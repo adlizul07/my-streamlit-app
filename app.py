@@ -1,3 +1,126 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import re
+from io import BytesIO
+from langdetect import detect, DetectorFactory
+from deep_translator import GoogleTranslator
+from sentence_transformers import SentenceTransformer
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.preprocessing import normalize
+
+# ==========================================
+# CONFIG
+# ==========================================
+st.set_page_config(page_title="Media Cleaning & NLP Pipeline", layout="wide")
+DetectorFactory.seed = 0
+
+# ==========================================
+# SESSION STATE
+# ==========================================
+if "data" not in st.session_state:
+    st.session_state.data = None
+
+# ==========================================
+# MODEL
+# ==========================================
+@st.cache_resource
+def load_embedding_model():
+    return SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
+
+# ==========================================
+# HELPERS
+# ==========================================
+def clean_text(text):
+    if pd.isnull(text):
+        return text
+    return str(text).replace('_x000D_', ' ').replace('\r', ' ').replace('\n', ' ').strip()
+
+def create_combined_column(df, cols):
+    try:
+        df["Combined"] = df[cols].fillna("").astype(str).agg(" ".join, axis=1)
+        df["Combined"] = df["Combined"].apply(clean_text)
+        return df, True
+    except Exception as e:
+        st.error(f"❌ Failed to create Combined column: {e}")
+        return df, False
+
+def remove_duplicates(df, excluded):
+    try:
+        subset = [c for c in df.columns if c not in excluded]
+        df = df.drop_duplicates(subset=subset)
+        return df, True
+    except Exception as e:
+        st.error(f"❌ Duplicate removal failed: {e}")
+        return df, False
+
+def extract_sentences(text, keywords):
+    if pd.isnull(text):
+        return ""
+    sentences = re.split(r'(?<=[.!?])\s+', str(text))
+    return "\n".join(
+        s for s in sentences
+        if any(k.lower() in s.lower() for k in keywords)
+    )
+
+def keyword_match(df, keyword_df, col_name):
+    try:
+        keywords = keyword_df.iloc[:, 0].dropna().astype(str).tolist()
+        df[col_name] = df["Combined"].apply(lambda x: extract_sentences(x, keywords))
+        return df, True
+    except Exception as e:
+        st.error(f"❌ Keyword matching failed: {e}")
+        return df, False
+
+def translate(df):
+    try:
+        translator = GoogleTranslator(source='auto', target='en')
+
+        def tr(x):
+            try:
+                return translator.translate(str(x)[:2000])
+            except:
+                return x
+
+        df["Translated"] = df["Combined"].apply(tr)
+        df["Translated"] = df["Translated"].apply(clean_text)
+        return df, True
+    except Exception as e:
+        st.error(f"❌ Translation failed: {e}")
+        return df, False
+
+def cluster(df, threshold):
+    try:
+        model = load_embedding_model()
+        texts = df["Combined"].fillna("").astype(str).tolist()
+
+        emb = model.encode(texts, convert_to_numpy=True, batch_size=32)
+        emb = normalize(emb)
+
+        clustering = AgglomerativeClustering(
+            n_clusters=None,
+            metric="cosine",
+            linkage="average",
+            distance_threshold=threshold
+        )
+
+        df["Cluster"] = clustering.fit_predict(emb)
+        return df, True
+    except Exception as e:
+        st.error(f"❌ Clustering failed: {e}")
+        return df, False
+
+def show_preview(df, title):
+    st.success(f"✅ {title} completed successfully")
+    st.dataframe(df.head(5))
+
+def to_excel(df):
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="data")
+    buffer.seek(0)
+    return buffer
+
 st.title("📊 Data Cleaning & NLP Pipeline")
 
 file = st.file_uploader("Upload Excel", type=["xlsx"])
