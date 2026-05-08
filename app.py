@@ -12,7 +12,7 @@ from sklearn.preprocessing import normalize
 # ==========================================
 # CONFIG
 # ==========================================
-st.set_page_config(page_title="Media Cleaning & NLP Pipeline", layout="wide")
+st.set_page_config(page_title="Data Cleaning & NLP Pipeline", layout="wide")
 DetectorFactory.seed = 0
 
 # ==========================================
@@ -21,11 +21,14 @@ DetectorFactory.seed = 0
 if "data" not in st.session_state:
     st.session_state.data = None
 
+if "file_loaded" not in st.session_state:
+    st.session_state.file_loaded = False
+
 # ==========================================
 # MODEL
 # ==========================================
 @st.cache_resource
-def load_embedding_model():
+def load_model():
     return SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
 
 # ==========================================
@@ -36,18 +39,15 @@ def clean_text(text):
         return text
     return str(text).replace('_x000D_', ' ').replace('\r', ' ').replace('\n', ' ').strip()
 
-def create_combined_column(df, cols):
+def create_combined(df, cols):
     df["Combined"] = df[cols].fillna("").astype(str).agg(" ".join, axis=1)
     df["Combined"] = df["Combined"].apply(clean_text)
     return df
 
-def remove_duplicates(df, excluded):
-    subset = [c for c in df.columns if c not in excluded]
+def remove_duplicates(df, exclude):
+    subset = [c for c in df.columns if c not in exclude]
     return df.drop_duplicates(subset=subset)
 
-# ==========================================
-# SENTENCE EXTRACTION
-# ==========================================
 def extract_sentences(text, keywords):
     if pd.isnull(text):
         return ""
@@ -57,19 +57,16 @@ def extract_sentences(text, keywords):
         if any(k.lower() in s.lower() for k in keywords)
     )
 
-def keyword_match(df, keyword_df, col_name):
-    keywords = keyword_df.iloc[:, 0].dropna().astype(str).tolist()
-    df[col_name] = df["Combined"].apply(lambda x: extract_sentences(x, keywords))
+def keyword_match(df, kw_df, col):
+    keywords = kw_df.iloc[:, 0].dropna().astype(str).tolist()
+    df[col] = df["Combined"].apply(lambda x: extract_sentences(x, keywords))
     return df
 
-def irrelevant_match(df, keyword_df, col_name):
-    keywords = keyword_df.iloc[:, 0].dropna().astype(str).tolist()
-    df[col_name] = df["Combined"].apply(lambda x: extract_sentences(x, keywords))
+def irrelevant_match(df, irr_df, col):
+    keywords = irr_df.iloc[:, 0].dropna().astype(str).tolist()
+    df[col] = df["Combined"].apply(lambda x: extract_sentences(x, keywords))
     return df
 
-# ==========================================
-# TRANSLATION
-# ==========================================
 def translate(df):
     translator = GoogleTranslator(source='auto', target='en')
 
@@ -83,11 +80,8 @@ def translate(df):
     df["Translated"] = df["Translated"].apply(clean_text)
     return df
 
-# ==========================================
-# CLUSTERING
-# ==========================================
 def cluster(df, threshold):
-    model = load_embedding_model()
+    model = load_model()
 
     texts = df["Combined"].fillna("").astype(str).tolist()
     emb = model.encode(texts, convert_to_numpy=True, batch_size=32)
@@ -103,9 +97,6 @@ def cluster(df, threshold):
     df["Cluster"] = clustering.fit_predict(emb)
     return df
 
-# ==========================================
-# EXCEL EXPORT
-# ==========================================
 def to_excel(df):
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -121,175 +112,175 @@ st.title("📊 Data Cleaning & NLP Pipeline")
 file = st.file_uploader("Upload Excel File", type=["xlsx"])
 
 # ==========================================
-# LOAD DATA ONLY ONCE
+# LOAD FILE ONLY ONCE (CRITICAL FIX)
 # ==========================================
-if file and st.session_state.data is None:
+if file and not st.session_state.file_loaded:
     xls = pd.ExcelFile(file)
     sheet = st.selectbox("Select Sheet", xls.sheet_names)
+
     st.session_state.data = pd.read_excel(file, sheet_name=sheet)
+    st.session_state.file_loaded = True
 
 df = st.session_state.data
 
-if df is not None:
+# STOP IF NO DATA
+if df is None:
+    st.info("⬆️ Upload a file to begin pipeline")
+    st.stop()
 
-    st.subheader("Current Data Preview")
-    st.dataframe(df.head(5))
+st.subheader("Current Data Preview")
+st.dataframe(df.head(5))
 
-    # ==========================================
-    # STEP 1 — COMBINED
-    # ==========================================
-    st.header("Step 1 — Combined Column")
+# ==========================================
+# STEP 1 — COMBINED
+# ==========================================
+st.header("Step 1 — Combined Column")
 
-    cols = st.multiselect("Select columns", df.columns)
+cols = st.multiselect("Select columns", df.columns)
 
-    c1, c2 = st.columns(2)
+c1, c2 = st.columns(2)
+with c1:
+    run = st.button("▶ Run Combined")
+with c2:
+    skip = st.button("⏭ Skip")
 
-    with c1:
-        run = st.button("▶ Run Combined")
-    with c2:
-        skip = st.button("⏭ Skip Combined")
-
-    if run:
-        if len(cols) == 0:
-            st.error("❌ Select at least one column")
-        else:
-            df = st.session_state.data
-            df = create_combined_column(df, cols)
-            st.session_state.data = df
-            st.success("✅ Combined column created")
-            st.dataframe(df.head(5))
-
-    if skip:
-        st.info("⏭ Combined skipped")
-
-    # ==========================================
-    # STEP 2 — DUPLICATES
-    # ==========================================
-    st.header("Step 2 — Remove Duplicates")
-
-    exclude = st.multiselect("Exclude columns", df.columns)
-
-    c1, c2 = st.columns(2)
-
-    with c1:
-        run = st.button("▶ Run Duplicates")
-    with c2:
-        skip = st.button("⏭ Skip Duplicates")
-
-    if run:
+if run:
+    if len(cols) == 0:
+        st.error("❌ Select columns first")
+    else:
         df = st.session_state.data
-        df = remove_duplicates(df, exclude)
+        df = create_combined(df, cols)
         st.session_state.data = df
-        st.success("✅ Duplicates removed")
+        st.success("✅ Combined created")
         st.dataframe(df.head(5))
 
-    if skip:
-        st.info("⏭ Duplicates skipped")
+if skip:
+    st.info("⏭ Skipped Combined")
 
-    # ==========================================
-    # STEP 3 — KEYWORDS + IRRELEVANT
-    # ==========================================
-    st.header("Step 3 — Keyword Matching")
+# ==========================================
+# STEP 2 — DUPLICATES
+# ==========================================
+st.header("Step 2 — Remove Duplicates")
 
-    kw_file = st.file_uploader("Keyword File", type=["xlsx"])
-    irr_file = st.file_uploader("Irrelevant Keyword File", type=["xlsx"])
+exclude = st.multiselect("Exclude columns", df.columns)
 
-    kw_col = st.text_input("Keyword Column", "Keyword Match")
-    irr_col = st.text_input("Irrelevant Column", "Irrelevant Match")
+c1, c2 = st.columns(2)
+with c1:
+    run = st.button("▶ Run Duplicates")
+with c2:
+    skip = st.button("⏭ Skip")
 
-    c1, c2 = st.columns(2)
+if run:
+    df = st.session_state.data
+    df = remove_duplicates(df, exclude)
+    st.session_state.data = df
+    st.success("✅ Duplicates removed")
+    st.dataframe(df.head(5))
 
-    with c1:
-        run_kw = st.button("▶ Run Keyword Match")
-    with c2:
-        skip = st.button("⏭ Skip Step 3")
+if skip:
+    st.info("⏭ Skipped")
 
-    if run_kw:
-        if "Combined" not in df.columns:
-            st.error("❌ Create Combined column first")
-        else:
-            df = st.session_state.data
+# ==========================================
+# STEP 3 — KEYWORDS + IRRELEVANT
+# ==========================================
+st.header("Step 3 — Keyword Matching")
 
-            if kw_file:
-                kw_df = pd.read_excel(kw_file)
-                df = keyword_match(df, kw_df, kw_col)
-                st.session_state.data = df
-                st.success("✅ Keyword matching done")
-                st.dataframe(df.head(5))
+kw_file = st.file_uploader("Keyword File", type=["xlsx"])
+irr_file = st.file_uploader("Irrelevant File", type=["xlsx"])
 
-            if irr_file:
-                irr_df = pd.read_excel(irr_file)
-                df = irrelevant_match(df, irr_df, irr_col)
-                st.session_state.data = df
-                st.success("✅ Irrelevant matching done")
-                st.dataframe(df.head(5))
+kw_col = st.text_input("Keyword Output Column", "Keyword Match")
+irr_col = st.text_input("Irrelevant Output Column", "Irrelevant Match")
 
-    if skip:
-        st.info("⏭ Step 3 skipped")
+c1, c2 = st.columns(2)
+with c1:
+    run = st.button("▶ Run Matching")
+with c2:
+    skip = st.button("⏭ Skip Step")
 
-    # ==========================================
-    # STEP 4 — TRANSLATION
-    # ==========================================
-    st.header("Step 4 — Translation")
+if run:
+    df = st.session_state.data
 
-    c1, c2 = st.columns(2)
+    if "Combined" not in df.columns:
+        st.error("❌ Combined column missing — run Step 1 first")
+    else:
+        if kw_file:
+            kw_df = pd.read_excel(kw_file)
+            df = keyword_match(df, kw_df, kw_col)
 
-    with c1:
-        run = st.button("▶ Run Translation")
-    with c2:
-        skip = st.button("⏭ Skip Translation")
+        if irr_file:
+            irr_df = pd.read_excel(irr_file)
+            df = irrelevant_match(df, irr_df, irr_col)
 
-    if run:
-        if "Combined" not in df.columns:
-            st.error("❌ Combined missing")
-        else:
-            df = st.session_state.data
-            df = translate(df)
-            st.session_state.data = df
-            st.success("✅ Translation done")
-            st.dataframe(df.head(5))
+        st.session_state.data = df
+        st.success("✅ Matching completed")
+        st.dataframe(df.head(5))
 
-    if skip:
-        st.info("⏭ Translation skipped")
+if skip:
+    st.info("⏭ Skipped")
 
-    # ==========================================
-    # STEP 5 — CLUSTERING
-    # ==========================================
-    st.header("Step 5 — Clustering")
+# ==========================================
+# STEP 4 — TRANSLATION
+# ==========================================
+st.header("Step 4 — Translation")
 
-    thr = st.slider("Cluster strictness", 0.1, 1.0, 0.28)
+c1, c2 = st.columns(2)
+with c1:
+    run = st.button("▶ Run Translation")
+with c2:
+    skip = st.button("⏭ Skip")
 
-    c1, c2 = st.columns(2)
+if run:
+    df = st.session_state.data
 
-    with c1:
-        run = st.button("▶ Run Clustering")
-    with c2:
-        skip = st.button("⏭ Skip Clustering")
+    if "Combined" not in df.columns:
+        st.error("❌ Combined missing")
+    else:
+        df = translate(df)
+        st.session_state.data = df
+        st.success("✅ Translation done")
+        st.dataframe(df.head(5))
 
-    if run:
-        if "Combined" not in df.columns:
-            st.error("❌ Combined missing")
-        else:
-            df = st.session_state.data
-            df = cluster(df, thr)
-            st.session_state.data = df
-            st.success("✅ Clustering done")
-            st.dataframe(df.head(5))
+if skip:
+    st.info("⏭ Skipped")
 
-    if skip:
-        st.info("⏭ Clustering skipped")
+# ==========================================
+# STEP 5 — CLUSTERING
+# ==========================================
+st.header("Step 5 — Clustering")
 
-    # ==========================================
-    # FINAL OUTPUT
-    # ==========================================
-    st.header("Final Output")
+threshold = st.slider("Strictness", 0.1, 1.0, 0.28)
 
-    st.dataframe(st.session_state.data.head(5))
+c1, c2 = st.columns(2)
+with c1:
+    run = st.button("▶ Run Clustering")
+with c2:
+    skip = st.button("⏭ Skip")
 
-    out = to_excel(st.session_state.data)
+if run:
+    df = st.session_state.data
 
-    st.download_button(
-        "📥 Download Excel",
-        data=out,
-        file_name="output.xlsx"
-    )
+    if "Combined" not in df.columns:
+        st.error("❌ Combined missing")
+    else:
+        df = cluster(df, threshold)
+        st.session_state.data = df
+        st.success("✅ Clustering done")
+        st.dataframe(df.head(5))
+
+if skip:
+    st.info("⏭ Skipped")
+
+# ==========================================
+# FINAL OUTPUT
+# ==========================================
+st.header("Final Output")
+
+st.dataframe(st.session_state.data.head(5))
+
+excel = to_excel(st.session_state.data)
+
+st.download_button(
+    "📥 Download Excel",
+    data=excel,
+    file_name="output.xlsx"
+)
