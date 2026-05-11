@@ -2,8 +2,11 @@ streamlit
 pandas
 numpy
 openpyxl
-langdetect
-deep-translator
-sentence-transformers
 scikit-learn
+sentence-transformers
+transformers
 torch
+deep-translator
+langdetect
+protobuf
+sentencepiece

@@ -8,6 +8,7 @@ from deep_translator import GoogleTranslator
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.preprocessing import normalize
+from transformers import pipeline
 
 # ==========================================
 # CONFIG
@@ -25,11 +26,18 @@ if "file_loaded" not in st.session_state:
     st.session_state.file_loaded = False
 
 # ==========================================
-# MODEL
+# MODELS
 # ==========================================
 @st.cache_resource
 def load_model():
     return SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
+
+@st.cache_resource
+def load_sentiment_model():
+    return pipeline(
+        "sentiment-analysis",
+        model="ProsusAI/finbert"
+    )
 
 # ==========================================
 # HELPERS
@@ -67,7 +75,56 @@ def extract_sentences(text, keywords):
     return "\n".join(matched)
 
 # ==========================================
-# KEYWORD ENGINE (SINGLE GROUP)
+# BRAND HELPERS
+# ==========================================
+def get_brand_aliases(brand):
+
+    if pd.isnull(brand):
+        return []
+
+    brand = str(brand).lower()
+
+    aliases = set()
+    aliases.add(brand)
+
+    cleaned = re.sub(r'\b(berhad|bhd|sdn bhd|ltd|inc|corp)\b', '', brand).strip()
+    aliases.add(cleaned)
+
+    words = cleaned.split()
+    if len(words) > 1:
+        aliases.add("".join([w[0] for w in words if w]))
+
+    manual = {
+        "maybank": ["malayan banking", "m2u"],
+        "tm": ["telekom malaysia"],
+        "pr1ma": ["perbadanan pr1ma malaysia", "prima"],
+        "kwsp": ["epf", "employees provident fund"]
+    }
+
+    if brand in manual:
+        aliases.update(manual[brand])
+
+    return list(aliases)
+
+
+def extract_brand_sentence(text, aliases):
+
+    if pd.isnull(text):
+        return ""
+
+    sentences = re.split(r'(?<=[.!?])\s+', str(text))
+
+    matched = []
+
+    for s in sentences:
+        sl = s.lower()
+        if any(a in sl for a in aliases):
+            matched.append(s)
+
+    return " ".join(matched)
+
+# ==========================================
+# KEYWORD ENGINE
 # ==========================================
 def keyword_match_v2(df, kw_file, kw_text, tag_col, sentence_col, create_sentence):
 
@@ -80,9 +137,6 @@ def keyword_match_v2(df, kw_file, kw_text, tag_col, sentence_col, create_sentenc
     elif kw_text:
         keywords = parse_keywords(kw_text)
 
-    # -------------------------
-    # Keyword TAGS only
-    # -------------------------
     def find_tags(text):
         if pd.isnull(text):
             return ""
@@ -92,9 +146,6 @@ def keyword_match_v2(df, kw_file, kw_text, tag_col, sentence_col, create_sentenc
 
     df[tag_col] = df["Combined"].apply(find_tags)
 
-    # -------------------------
-    # OPTIONAL SENTENCES
-    # -------------------------
     if create_sentence:
         df[sentence_col] = df["Combined"].apply(
             lambda x: extract_sentences(x, keywords)
@@ -165,7 +216,6 @@ st.title("📊 Your Number 1 Data Cleaner!")
 
 file = st.file_uploader("Upload Excel File", type=["xlsx"])
 
-# LOAD FILE
 if file and not st.session_state.file_loaded:
     xls = pd.ExcelFile(file)
     sheet = st.selectbox("Select Sheet", xls.sheet_names)
@@ -186,7 +236,6 @@ st.dataframe(df.head(5))
 # STEP 1 — COMBINED
 # ==========================================
 st.header("Step 1 — Combined Column")
-st.info("Combine selected columns into a single text field for NLP processing.")
 
 cols = st.multiselect("Select columns", df.columns)
 
@@ -194,7 +243,6 @@ if st.button("▶ Run Combined"):
     df = create_combined(df, cols)
     st.session_state.data = df
     st.success("✅ Combined created")
-    st.dataframe(df.head(5))
 
 # ==========================================
 # STEP 2 — DUPLICATES
@@ -207,68 +255,32 @@ if st.button("▶ Run Duplicates"):
     df = remove_duplicates(df, exclude)
     st.session_state.data = df
     st.success("✅ Duplicates removed")
-    st.dataframe(df.head(5))
 
 # ==========================================
-# STEP 3 — MULTI KEYWORDS
+# STEP 3 — KEYWORDS
 # ==========================================
-st.header("Step 3 — Keyword Matching (Multi Groups)")
-st.info("Keyword Tags will always be created. Sentence extraction is optional.")
+st.header("Step 3 — Keyword Matching")
 
 num_groups = st.number_input("How many keyword groups?", 1, 10, 1)
 
 for i in range(num_groups):
 
-    st.markdown(f"### 🔹 Group {i+1}")
+    kw_file = st.file_uploader(f"Keyword file {i+1}", type=["xlsx"], key=f"kwf{i}")
+    kw_text = st.text_input(f"Keywords {i+1}", key=f"kwt{i}")
 
-    kw_file = st.file_uploader(
-        f"Upload keywords (Group {i+1})",
-        type=["xlsx"],
-        key=f"kw_file_{i}"
-    )
+    tag_col = st.text_input(f"Tag column {i+1}", f"Keyword_Tags_{i+1}", key=f"tag{i}")
+    sent_col = st.text_input(f"Sentence column {i+1}", f"Keyword_Sentences_{i+1}", key=f"sent{i}")
 
-    kw_text = st.text_input(
-        f"OR type keywords (comma separated) — Group {i+1}",
-        key=f"kw_text_{i}"
-    )
+    create_sentence = st.checkbox(f"Create sentence {i+1}", key=f"chk{i}")
 
-    tag_col = st.text_input(
-        f"Tag column name — Group {i+1}",
-        value=f"Keyword_Tags_{i+1}",
-        key=f"tag_{i}"
-    )
-
-    sentence_col = st.text_input(
-        f"Sentence column name — Group {i+1}",
-        value=f"Keyword_Sentences_{i+1}",
-        key=f"sent_{i}"
-    )
-
-    create_sentence = st.checkbox(
-        f"Create sentence column? (Group {i+1})",
-        key=f"chk_{i}"
-    )
-
-    if st.button(f"▶ Run Group {i+1}", key=f"run_{i}"):
+    if st.button(f"Run Group {i+1}", key=f"run{i}"):
 
         df = st.session_state.data
 
-        if "Combined" not in df.columns:
-            st.error("❌ Combined column missing")
-            st.stop()
-
-        df = keyword_match_v2(
-            df,
-            kw_file,
-            kw_text,
-            tag_col,
-            sentence_col,
-            create_sentence
-        )
+        df = keyword_match_v2(df, kw_file, kw_text, tag_col, sent_col, create_sentence)
 
         st.session_state.data = df
-        st.success(f"✅ Group {i+1} completed")
-        st.dataframe(df.head(5))
+        st.success(f"Group {i+1} done")
 
 # ==========================================
 # STEP 4 — TRANSLATION
@@ -277,27 +289,75 @@ st.header("Step 4 — Translation")
 
 if st.button("▶ Run Translation"):
     df = st.session_state.data
-
     df = translate(df)
     st.session_state.data = df
-    st.success("✅ Translation done")
-    st.dataframe(df.head(5))
+    st.success("Translation done")
 
 # ==========================================
-# STEP 5 — CLUSTERING
+# STEP 5 — SENTIMENT ANALYSIS (NEW)
 # ==========================================
-st.header("Step 5 — Clustering")
+st.header("Step 5 — Sentiment Analysis (Brand Level)")
+
+st.warning("Use 'Translated' for better accuracy if data is multilingual.")
+
+sent_source = st.radio("Sentiment source:", ["Combined", "Translated"])
+
+brand_col = st.selectbox("Select brand column", df.columns)
+
+if st.button("▶ Run Sentiment Analysis"):
+
+    df = st.session_state.data
+    model = load_sentiment_model()
+
+    sentiments = []
+    scores = []
+    sentences = []
+
+    for _, row in df.iterrows():
+
+        text = row[sent_source]
+        brand = row[brand_col]
+
+        aliases = get_brand_aliases(brand)
+        brand_text = extract_brand_sentence(text, aliases)
+
+        if brand_text.strip() == "":
+            sentiments.append("NO_MENTION")
+            scores.append(None)
+            sentences.append("")
+            continue
+
+        try:
+            result = model(brand_text[:512])[0]
+
+            sentiments.append(result["label"])
+            scores.append(result["score"])
+            sentences.append(brand_text)
+
+        except:
+            sentiments.append("ERROR")
+            scores.append(None)
+            sentences.append("")
+
+    df["Brand_Sentiment"] = sentiments
+    df["Sentiment_Score"] = scores
+    df["Matched_Sentence"] = sentences
+
+    st.session_state.data = df
+    st.success("Sentiment analysis completed")
+
+# ==========================================
+# STEP 6 — CLUSTERING
+# ==========================================
+st.header("Step 6 — Clustering")
 
 threshold = st.slider("Strictness", 0.1, 1.0, 0.28)
 
 if st.button("▶ Run Clustering"):
     df = st.session_state.data
-
     df = cluster(df, threshold)
     st.session_state.data = df
-
-    st.success("✅ Clustering done")
-    st.dataframe(df.head(5))
+    st.success("Clustering done")
 
 # ==========================================
 # OUTPUT
