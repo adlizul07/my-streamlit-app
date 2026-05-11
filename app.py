@@ -50,6 +50,14 @@ def icon(status):
         "Skipped": "⚪"
     }.get(status, "🟡")
 
+# ==========================================
+# PREVIEW FUNCTION
+# ==========================================
+def show_preview(step, df):
+
+    if get_status(step) == "Done":
+        st.dataframe(df.head(), use_container_width=True)
+
 
 # ==========================================
 # MODELS
@@ -191,14 +199,21 @@ exclude_cols = st.multiselect(
     df.columns
 )
 
-if st.button("▶ Run Step 2"):
+col1, col2 = st.columns(2)
+
+if col1.button("▶ Run Step 2"):
 
     set_status("step2", "Running")
     df = remove_duplicates(df, exclude_cols)
     st.session_state.data = df
     set_status("step2", "Done")
 
+if col2.button("⏭ Skip Step 2"):
+    set_status("step2", "Skipped")
+
 st.write(f"Status: {icon(get_status('step2'))} {get_status('step2')}")
+
+show_preview("step2", df)
 
 
 # ==========================================
@@ -227,7 +242,9 @@ tag_col = st.text_input("Tag column", "Tags")
 extract_sent = st.checkbox("Extract sentences?")
 sent_col = st.text_input("Sentence column", "Sent")
 
-if st.button("▶ Run Step 3"):
+col1, col2 = st.columns(2)
+
+if col1.button("▶ Run Step 3"):
 
     set_status("step3", "Running")
 
@@ -255,7 +272,12 @@ if st.button("▶ Run Step 3"):
     st.session_state.data = df
     set_status("step3", "Done")
 
+if col2.button("⏭ Skip Step 3"):
+    set_status("step3", "Skipped")
+
 st.write(f"Status: {icon(get_status('step3'))} {get_status('step3')}")
+
+show_preview("step3", df)
 
 
 # ==========================================
@@ -263,7 +285,9 @@ st.write(f"Status: {icon(get_status('step3'))} {get_status('step3')}")
 # ==========================================
 st.header(f"{icon(get_status('step4'))} Step 4 — Translation")
 
-if st.button("▶ Run Step 4"):
+col1, col2 = st.columns(2)
+
+if col1.button("▶ Run Step 4"):
 
     set_status("step4", "Running")
 
@@ -278,6 +302,10 @@ if st.button("▶ Run Step 4"):
 
 st.write(f"Status: {icon(get_status('step4'))} {get_status('step4')}")
 
+if col2.button("⏭ Skip Step 4"):
+    set_status("step4", "Skipped")
+
+show_preview("step4", df)
 
 # ==========================================
 # STEP 5
@@ -287,7 +315,9 @@ st.header(f"{icon(get_status('step5'))} Step 5 — Sentiment")
 source = st.radio("Source", ["Combined", "Translated"] if "Translated" in df.columns else ["Combined"])
 brand_col = st.selectbox("Brand column", df.columns)
 
-if st.button("▶ Run Step 5"):
+col1, col2 = st.columns(2)
+
+if col1.button("▶ Run Step 5"):
 
     set_status("step5", "Running")
 
@@ -309,6 +339,10 @@ if st.button("▶ Run Step 5"):
 
 st.write(f"Status: {icon(get_status('step5'))} {get_status('step5')}")
 
+if col2.button("⏭ Skip Step 5"):
+    set_status("step5", "Skipped")
+
+show_preview("step5", df)
 
 # ==========================================
 # STEP 6
@@ -317,7 +351,9 @@ st.header(f"{icon(get_status('step6'))} Step 6 — Clustering")
 
 threshold = st.slider("Strictness", 0.25, 0.35, 0.28)
 
-if st.button("▶ Run Step 6"):
+col1, col2 = st.columns(2)
+
+if col1.button("▶ Run Step 6"):
 
     set_status("step6", "Running")
 
@@ -348,6 +384,10 @@ if st.button("▶ Run Step 6"):
 
 st.write(f"Status: {icon(get_status('step6'))} {get_status('step6')}")
 
+if col2.button("⏭ Skip Step 6"):
+    set_status("step6", "Skipped")
+
+show_preview("step6", df)
 
 # ==========================================
 # OUTPUT (HYPERLINK PRESERVE FIX)
