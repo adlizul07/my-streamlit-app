@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import re
 from io import BytesIO
-from langdetect import DetectorFactory
 from deep_translator import GoogleTranslator
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
@@ -11,31 +10,13 @@ from sklearn.preprocessing import normalize
 from transformers import pipeline
 
 # ==========================================
-# CONFIG + THEME
+# CONFIG
 # ==========================================
 st.set_page_config(
     page_title="Data Cleaner Pro",
     layout="wide",
     page_icon="📊"
 )
-
-st.markdown("""
-<style>
-.block-container {padding: 2rem 2rem 3rem 2rem;}
-h1, h2, h3 {font-weight: 600;}
-.stButton > button {
-    border-radius: 10px;
-    padding: 0.4rem 1rem;
-}
-div[data-testid="stExpander"] {
-    border-radius: 12px;
-    border: 1px solid #eee;
-    padding: 5px;
-}
-</style>
-""", unsafe_allow_html=True)
-
-DetectorFactory.seed = 0
 
 # ==========================================
 # SESSION STATE
@@ -74,12 +55,9 @@ def remove_duplicates(df, exclude):
     subset = [c for c in df.columns if c not in exclude]
     return df.drop_duplicates(subset=subset) if subset else df
 
-def parse_keywords(text):
-    return [k.strip() for k in text.split(",") if k.strip()]
-
 def extract_sentences(text, keywords):
     sentences = re.split(r'(?<=[.!?])\s+', str(text))
-    return "\n".join([s for s in sentences if any(k.lower() in s.lower() for k in keywords)])
+    return " ".join([s for s in sentences if any(k.lower() in s.lower() for k in keywords)])
 
 def generate_cluster_summary(df):
     cluster_map = {}
@@ -90,7 +68,6 @@ def generate_cluster_summary(df):
         if len(sample) == 0:
             cluster_map[c] = "Empty cluster"
         else:
-            # take first 3 samples
             preview = sample.head(3).tolist()
             cluster_map[c] = " | ".join([p[:80] for p in preview])
 
@@ -98,165 +75,170 @@ def generate_cluster_summary(df):
     return df
 
 # ==========================================
-# STATUS BADGE
+# PIPELINE
 # ==========================================
-def badge(status):
-    colors = {
-        "Not Run": "🟡",
-        "Running": "🔵",
-        "Done": "🟢",
-        "Error": "🔴",
-        "Skipped": "⚪"
-    }
-    return f"{colors.get(status, '🟡')} {status}"
+def translate(df):
+    translator = GoogleTranslator(source='auto', target='en')
+
+    def tr(x):
+        try:
+            return translator.translate(str(x)[:2000])
+        except:
+            return x
+
+    df["Translated"] = df["Combined"].apply(tr)
+    return df
+
+def cluster(df, threshold):
+    model = load_model()
+
+    emb = model.encode(df["Combined"].astype(str).tolist(), convert_to_numpy=True)
+    emb = normalize(emb)
+
+    clustering = AgglomerativeClustering(
+        n_clusters=None,
+        metric="cosine",
+        linkage="average",
+        distance_threshold=threshold
+    )
+
+    df["Cluster"] = clustering.fit_predict(emb)
+    df = generate_cluster_summary(df)
+
+    return df
+
+def to_excel(df):
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False)
+    buffer.seek(0)
+    return buffer
 
 # ==========================================
-# SIDEBAR
+# UI
 # ==========================================
-st.sidebar.title("⚙️ Controls")
+st.title("📊 Data Cleaner Pro")
 
-file = st.sidebar.file_uploader("Upload Excel", type=["xlsx"])
+file = st.file_uploader("Upload Excel File", type=["xlsx"])
 
-st.sidebar.markdown("---")
-st.sidebar.info("Pipeline will process step-by-step")
-
-# ==========================================
 # LOAD DATA
-# ==========================================
 if file and not st.session_state.file_loaded:
     xls = pd.ExcelFile(file)
-    sheet = st.sidebar.selectbox("Sheet", xls.sheet_names)
+    sheet = st.selectbox("Select Sheet", xls.sheet_names)
     st.session_state.data = pd.read_excel(file, sheet_name=sheet)
     st.session_state.file_loaded = True
 
 df = st.session_state.data
 
 if df is None:
-    st.title("📊 Data Cleaner Pro")
-    st.info("Upload a file to begin")
+    st.info("Upload a file to start")
+    st.stop()
+
+st.subheader("Preview")
+st.dataframe(df.head(), use_container_width=True)
+
+# ==========================================
+# STEP 1 (REQUIRED)
+# ==========================================
+st.header("🧩 Step 1 — Combine Columns (REQUIRED)")
+st.warning("⚠️ Step 1 is required because all other steps depend on the Combined column.")
+
+cols = st.multiselect("Select columns", df.columns)
+
+if st.button("▶ Run Step 1"):
+    if len(cols) == 0:
+        st.error("Please select at least one column")
+    else:
+        df = create_combined(df, cols)
+        st.session_state.data = df
+        st.success("Step 1 Completed ✔")
+
+# STOP if no Combined
+if "Combined" not in df.columns:
     st.stop()
 
 # ==========================================
-# DASHBOARD HEADER
+# STEP 2 (SKIPPABLE)
 # ==========================================
-st.title("📊 Data Cleaner Pro")
+st.header("🧹 Step 2 — Remove Duplicates")
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Rows", len(df))
-col2.metric("Columns", len(df.columns))
-col3.metric("Status", "Active")
-col4.metric("Pipeline", "Ready")
+skip2 = st.checkbox("Skip Step 2")
 
-st.markdown("---")
-
-st.dataframe(df.head(10), use_container_width=True)
-
-# ==========================================
-# STEP 1
-# ==========================================
-with st.expander("🧩 Step 1 — Combine Columns", expanded=True):
-
-    cols = st.multiselect("Select columns", df.columns)
-
-    c1, c2 = st.columns(2)
-    run = c1.button("▶ Run Step 1")
-    skip = c2.button("⏭ Skip Step 1")
-
-    if run:
-        df = create_combined(df, cols)
-        st.session_state.data = df
-        st.success(badge("Done"))
-
-    if skip:
-        st.warning(badge("Skipped"))
-
-# ==========================================
-# STEP 2
-# ==========================================
-with st.expander("🧹 Step 2 — Remove Duplicates"):
+if not skip2:
 
     exclude = st.multiselect("Exclude columns", df.columns)
 
-    c1, c2 = st.columns(2)
-    run = c1.button("▶ Run Step 2")
-    skip = c2.button("⏭ Skip Step 2")
-
-    if run:
+    if st.button("▶ Run Step 2"):
         df = remove_duplicates(df, exclude)
         st.session_state.data = df
-        st.success(badge("Done"))
-
-    if skip:
-        st.warning(badge("Skipped"))
+        st.success("Step 2 Done ✔")
 
 # ==========================================
-# STEP 3
+# STEP 3 (SKIPPABLE)
 # ==========================================
-with st.expander("🔑 Step 3 — Keyword Matching"):
+st.header("🔑 Step 3 — Keyword Matching")
 
-    num = st.number_input("Groups", 1, 10, 1)
+skip3 = st.checkbox("Skip Step 3")
+
+if not skip3:
+
+    num = st.number_input("Keyword groups", 1, 10, 1)
 
     for i in range(num):
 
-        st.markdown(f"### Group {i+1}")
+        st.subheader(f"Group {i+1}")
 
         kw_text = st.text_input("Keywords (comma separated)", key=f"k{i}")
         tag_col = st.text_input("Tag column", f"Tags_{i+1}")
 
-        # ⭐ NEW OPTION
-        extract_sentence = st.checkbox(
-            "Extract matching sentences?",
-            key=f"sent_opt_{i}"
-        )
+        extract_sent = st.checkbox("Extract sentences?", key=f"s{i}")
 
         sent_col = st.text_input(
-            "Sentence column name",
+            "Sentence column",
             f"Sent_{i+1}",
-            disabled=not extract_sentence
+            disabled=not extract_sent
         )
 
         if st.button(f"▶ Run Group {i+1}"):
 
             keywords = [k.strip() for k in kw_text.split(",") if k.strip()]
 
-            # TAGGING
             df[tag_col] = df["Combined"].apply(
                 lambda x: ", ".join([k for k in keywords if k.lower() in str(x).lower()])
             )
 
-            # ⭐ OPTIONAL SENTENCE EXTRACTION
-            if extract_sentence:
-
-                def extract_sent(text):
-                    sentences = re.split(r'(?<=[.!?])\s+', str(text))
-                    return " ".join([
-                        s for s in sentences
-                        if any(k.lower() in s.lower() for k in keywords)
-                    ])
-
-                df[sent_col] = df["Combined"].apply(extract_sent)
+            if extract_sent:
+                df[sent_col] = df["Combined"].apply(
+                    lambda x: extract_sentences(x, keywords)
+                )
 
             st.session_state.data = df
-            st.success("✔ Done")
+            st.success("Step 3 Done ✔")
 
 # ==========================================
-# STEP 4
+# STEP 4 (SKIPPABLE)
 # ==========================================
-with st.expander("🌍 Step 4 — Translation"):
+st.header("🌍 Step 4 — Translation")
+
+skip4 = st.checkbox("Skip Step 4")
+
+if not skip4:
 
     if st.button("▶ Run Translation"):
-        translator = GoogleTranslator(source='auto', target='en')
-        df["Translated"] = df["Combined"].apply(lambda x: translator.translate(str(x)[:2000]))
+        df = translate(df)
         st.session_state.data = df
-        st.success(badge("Done"))
+        st.success("Step 4 Done ✔")
 
 # ==========================================
-# STEP 5
+# STEP 5 (SKIPPABLE)
 # ==========================================
-with st.expander("💬 Step 5 — Sentiment"):
+st.header("💬 Step 5 — Sentiment")
 
-    source = st.radio("Source", ["Combined", "Translated"])
+skip5 = st.checkbox("Skip Step 5")
 
+if not skip5:
+
+    source = st.radio("Source", ["Combined", "Translated"] if "Translated" in df.columns else ["Combined"])
     brand_col = st.selectbox("Brand column", df.columns)
 
     if st.button("▶ Run Sentiment"):
@@ -279,12 +261,16 @@ with st.expander("💬 Step 5 — Sentiment"):
 
         df["Sentiment"] = results
         st.session_state.data = df
-        st.success(badge("Done"))
+        st.success("Step 5 Done ✔")
 
 # ==========================================
-# STEP 6
+# STEP 6 (SKIPPABLE)
 # ==========================================
-with st.expander("📦 Step 6 — Clustering"):
+st.header("📦 Step 6 — Clustering")
+
+skip6 = st.checkbox("Skip Step 6")
+
+if not skip6:
 
     threshold = st.slider("Strictness", 0.25, 0.35, 0.28)
 
@@ -292,10 +278,7 @@ with st.expander("📦 Step 6 — Clustering"):
 
         model = load_model()
 
-        emb = model.encode(
-            df["Combined"].astype(str).tolist(),
-            convert_to_numpy=True
-        )
+        emb = model.encode(df["Combined"].astype(str).tolist(), convert_to_numpy=True)
         emb = normalize(emb)
 
         clustering = AgglomerativeClustering(
@@ -307,11 +290,10 @@ with st.expander("📦 Step 6 — Clustering"):
 
         df["Cluster"] = clustering.fit_predict(emb)
 
-        # ⭐ NEW: cluster description
         df = generate_cluster_summary(df)
 
         st.session_state.data = df
-        st.success("✔ Clustering + Description Done")
+        st.success("Step 6 Done ✔")
 
 # ==========================================
 # OUTPUT
@@ -323,6 +305,6 @@ st.dataframe(df, use_container_width=True)
 
 st.download_button(
     "📥 Download Excel",
-    data=BytesIO(),
+    data=to_excel(df),
     file_name="output.xlsx"
 )
