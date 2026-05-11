@@ -8,6 +8,7 @@ from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.preprocessing import normalize
 from transformers import pipeline
+from openpyxl import load_workbook
 
 # ==========================================
 # CONFIG
@@ -19,11 +20,51 @@ st.set_page_config(
 )
 
 # ==========================================
-# SESSION STATE
+# KEEP HYPERLINKS (FIXED)
+# ==========================================
+def load_excel_with_hyperlinks(file, sheet_name):
+    wb = load_workbook(file, data_only=False)
+    ws = wb[sheet_name]
+
+    headers = [cell.value for cell in ws[1]]
+
+    rows = []
+    for row in ws.iter_rows(min_row=2):
+        row_data = []
+
+        for cell in row:
+            # FIXED: safer hyperlink handling
+            if cell.hyperlink and cell.hyperlink.target:
+                row_data.append(cell.hyperlink.target)
+            elif isinstance(cell.value, str) and cell.value.startswith("http"):
+                row_data.append(cell.value)
+            else:
+                row_data.append(cell.value)
+
+        rows.append(row_data)
+
+    return pd.DataFrame(rows, columns=headers)
+
+# ==========================================
+# SESSION STATE RESET (FIXED)
 # ==========================================
 if "data" not in st.session_state:
     st.session_state.data = None
 
+if "file_hash" not in st.session_state:
+    st.session_state.file_hash = None
+
+# RESET when new file uploaded
+def reset_state(file):
+    if file is not None:
+        current_hash = hash(file.getvalue())
+        if st.session_state.file_hash != current_hash:
+            st.session_state.data = None
+            st.session_state.file_hash = current_hash
+
+# ==========================================
+# STATUS SYSTEM
+# ==========================================
 if "status" not in st.session_state:
     st.session_state.status = {
         "step1": "Not Run",
@@ -88,48 +129,10 @@ def generate_cluster_summary(df):
     df["Cluster_Description"] = df["Cluster"].map(summary)
     return df
 
-from openpyxl import Workbook
-from openpyxl.utils.dataframe import dataframe_to_rows
-from openpyxl.styles import Font
-
 def to_excel(df):
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Output"
-
-    # write dataframe rows
-    for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
-        for c_idx, value in enumerate(row, 1):
-
-            cell = ws.cell(row=r_idx, column=c_idx)
-
-            # header row
-            if r_idx == 1:
-                cell.value = value
-                continue
-
-            # preserve hyperlinks
-            if isinstance(value, str) and value.startswith(("http://", "https://")):
-                cell.value = value
-                cell.hyperlink = value
-                cell.font = Font(color="0000FF", underline="single")
-            else:
-                cell.value = value
-
-    # auto column width (optional nice touch)
-    for col in ws.columns:
-        max_len = 0
-        col_letter = col[0].column_letter
-        for cell in col:
-            try:
-                if cell.value:
-                    max_len = max(max_len, len(str(cell.value)))
-            except:
-                pass
-        ws.column_dimensions[col_letter].width = min(max_len + 2, 60)
-
     buffer = BytesIO()
-    wb.save(buffer)
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False)
     buffer.seek(0)
     return buffer
 
@@ -140,10 +143,12 @@ st.title("📊 Data Cleaner Pro")
 
 file = st.file_uploader("Upload Excel File", type=["xlsx"])
 
+reset_state(file)
+
 if file and st.session_state.data is None:
     xls = pd.ExcelFile(file)
     sheet = st.selectbox("Select Sheet", xls.sheet_names)
-    st.session_state.data = pd.read_excel(file, sheet_name=sheet)
+    st.session_state.data = load_excel_with_hyperlinks(file, sheet)
 
 df = st.session_state.data
 
@@ -175,12 +180,12 @@ if run1:
 if skip1:
     set_status("step1", "Skipped")
 
-if get_status("step1") == "Done":
-    st.dataframe(df.head(), use_container_width=True)
-
 if "Combined" not in df.columns:
     st.warning("Step 1 required")
     st.stop()
+
+if get_status("step1") == "Done":
+    st.dataframe(df.head(), use_container_width=True)
 
 # ==========================================
 # STEP 2
@@ -227,7 +232,6 @@ for i in range(num):
     skip3 = c2.button("⏭ Skip", key=f"skip3_{i}")
 
     if run3:
-
         set_status("step3", "Running")
 
         if kw_file and kw_text:
