@@ -26,7 +26,7 @@ def set_status(step, value):
     st.session_state[step] = value
 
 # ==========================================
-# STEP SKIP CONTROL
+# STEP CONTROL (SKIP SYSTEM)
 # ==========================================
 for i in range(1, 7):
     if f"skip_step{i}" not in st.session_state:
@@ -122,7 +122,7 @@ def extract_brand_sentence(text, aliases):
     return " ".join([s for s in sentences if any(a in s.lower() for a in aliases)])
 
 # ==========================================
-# PROCESS FUNCTIONS
+# PIPELINE FUNCTIONS
 # ==========================================
 def keyword_match_v2(df, kw_file, kw_text, tag_col, sentence_col, create_sentence):
 
@@ -214,8 +214,8 @@ st.header("Step 1 — Combined Column")
 cols = st.multiselect("Select columns", df.columns)
 
 c1, c2 = st.columns(2)
-run1 = c1.button("▶ Run", disabled=is_skipped(1))
-skip1 = c2.button("⏭ Skip")
+run1 = c1.button("▶ Run", key="run_step1", disabled=is_skipped(1))
+skip1 = c2.button("⏭ Skip", key="skip_step1")
 
 if skip1:
     set_skip(1)
@@ -240,8 +240,8 @@ st.header("Step 2 — Remove Duplicates")
 exclude = st.multiselect("Exclude columns", df.columns)
 
 c1, c2 = st.columns(2)
-run2 = c1.button("▶ Run", disabled=is_skipped(2))
-skip2 = c2.button("⏭ Skip")
+run2 = c1.button("▶ Run", key="run_step2", disabled=is_skipped(2))
+skip2 = c2.button("⏭ Skip", key="skip_step2")
 
 if skip2:
     set_skip(2)
@@ -277,8 +277,8 @@ for i in range(num_groups):
     create_sentence = st.checkbox("Create sentence", key=f"cs{i}")
 
     c1, c2 = st.columns(2)
-    run3 = c1.button("▶ Run", key=f"run{i}", disabled=is_skipped(3))
-    skip3 = c2.button("⏭ Skip", key=f"skip{i}")
+    run3 = c1.button("▶ Run", key=f"run_step3_{i}", disabled=is_skipped(3))
+    skip3 = c2.button("⏭ Skip", key=f"skip_step3_{i}")
 
     if skip3:
         set_skip(3)
@@ -301,8 +301,8 @@ st.write(status_icon("step3"))
 st.header("Step 4 — Translation")
 
 c1, c2 = st.columns(2)
-run4 = c1.button("▶ Run", disabled=is_skipped(4))
-skip4 = c2.button("⏭ Skip")
+run4 = c1.button("▶ Run", key="run_step4", disabled=is_skipped(4))
+skip4 = c2.button("⏭ Skip", key="skip_step4")
 
 if skip4:
     set_skip(4)
@@ -320,7 +320,7 @@ if run4 and not is_skipped(4):
 st.write(status_icon("step4"))
 
 # ==========================================
-# STEP 5 — SENTIMENT
+# STEP 5
 # ==========================================
 st.header("Step 5 — Sentiment")
 
@@ -328,8 +328,8 @@ sent_source = st.radio("Source", ["Combined", "Translated"])
 brand_col = st.selectbox("Brand column", df.columns)
 
 c1, c2 = st.columns(2)
-run5 = c1.button("▶ Run", disabled=is_skipped(5))
-skip5 = c2.button("⏭ Skip")
+run5 = c1.button("▶ Run", key="run_step5", disabled=is_skipped(5))
+skip5 = c2.button("⏭ Skip", key="skip_step5")
 
 if skip5:
     set_skip(5)
@@ -344,7 +344,6 @@ if run5 and not is_skipped(5):
         sentiments, scores = [], []
 
         for _, row in df.iterrows():
-
             text = row[sent_source]
             brand = row[brand_col]
 
@@ -379,8 +378,8 @@ st.header("Step 6 — Clustering")
 threshold = st.slider("Strictness", 0.25, 0.35, 0.28)
 
 c1, c2 = st.columns(2)
-run6 = c1.button("▶ Run", disabled=is_skipped(6))
-skip6 = c2.button("⏭ Skip")
+run6 = c1.button("▶ Run", key="run_step6", disabled=is_skipped(6))
+skip6 = c2.button("⏭ Skip", key="skip_step6")
 
 if skip6:
     set_skip(6)
