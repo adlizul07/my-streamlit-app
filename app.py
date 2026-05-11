@@ -50,6 +50,12 @@ def icon(status):
         "Skipped": "⚪"
     }.get(status, "🟡")
 
+if "history" not in st.session_state:
+    st.session_state.history = []
+
+if "history_index" not in st.session_state:
+    st.session_state.history_index = -1
+
 # ==========================================
 # PREVIEW FUNCTION
 # ==========================================
@@ -103,6 +109,32 @@ def to_excel(df):
     buffer.seek(0)
     return buffer
 
+def save_state(df):
+    """Save current dataframe state into history"""
+    # If we undo then make new change, remove future states
+    st.session_state.history = st.session_state.history[:st.session_state.history_index + 1]
+
+    st.session_state.history.append(df.copy())
+    st.session_state.history_index += 1
+
+
+def get_current_df():
+    if st.session_state.history_index >= 0:
+        return st.session_state.history[st.session_state.history_index]
+    return None
+
+
+def undo():
+    if st.session_state.history_index > 0:
+        st.session_state.history_index -= 1
+    return get_current_df()
+
+
+def redo():
+    if st.session_state.history_index < len(st.session_state.history) - 1:
+        st.session_state.history_index += 1
+    return get_current_df()
+
 # ==========================================
 # LOAD FILE (HYPERLINK SAFE)
 # ==========================================
@@ -143,7 +175,11 @@ file = st.file_uploader("Upload Excel File", type=["xlsx"])
 if file and st.session_state.data is None:
     xls = pd.ExcelFile(file)
     sheet = st.selectbox("Select Sheet", xls.sheet_names)
-    st.session_state.data = load_excel(file, sheet)
+    df = load_excel(file, sheet)
+
+st.session_state.data = df
+st.session_state.history = [df.copy()]
+st.session_state.history_index = 0
 
 df = st.session_state.data
 
@@ -152,6 +188,23 @@ if df is None:
     st.stop()
 
 st.dataframe(df.head(), use_container_width=True)
+
+st.markdown("---")
+st.subheader("🧠 History Control (Excel-style Undo/Redo)")
+
+col_u, col_r = st.columns(2)
+
+with col_u:
+    if st.button("↩ Undo"):
+        df = undo()
+        st.session_state.data = df
+        st.rerun()
+
+with col_r:
+    if st.button("↪ Redo"):
+        df = redo()
+        st.session_state.data = df
+        st.rerun()
 
 # ==========================================
 # STEP 1
@@ -164,7 +217,8 @@ if st.button("▶ Run Step 1"):
     if cols:
         set_status("step1", "Running")
         df = create_combined(df, cols)
-        st.session_state.data = df
+        save_state(df)
+st.session_state.data = df
         set_status("step1", "Done")
     else:
         set_status("step1", "Error")
@@ -186,7 +240,8 @@ col1, col2 = st.columns(2)
 if col1.button("▶ Run Step 2"):
     set_status("step2", "Running")
     df = remove_duplicates(df, exclude_cols)
-    st.session_state.data = df
+    save_state(df)
+st.session_state.data = df
     set_status("step2", "Done")
 
 if col2.button("⏭ Skip Step 2"):
@@ -287,7 +342,8 @@ if col1.button("▶ Run Step 3"):
 
         df[sent_col] = df["Combined"].apply(extract_matching_sentences)
 
-    st.session_state.data = df
+    save_state(df)
+st.session_state.data = df
     set_status("step3", "Done")
 
 if col2.button("⏭ Skip Step 3"):
@@ -318,7 +374,8 @@ if col1.button("▶ Run Step 4"):
         lambda x: translator.translate(str(x)[:2000])
     )
 
-    st.session_state.data = df
+    save_state(df)
+st.session_state.data = df
     set_status("step4", "Done")
 
 if col2.button("⏭ Skip Step 4"):
@@ -352,7 +409,8 @@ if col1.button("▶ Run Step 5"):
             results.append(model(text[:512])[0]["label"])
 
     df["Sentiment"] = results
-    st.session_state.data = df
+    save_state(df)
+st.session_state.data = df
     set_status("step5", "Done")
 
 if col2.button("⏭ Skip Step 5"):
@@ -394,7 +452,8 @@ if col1.button("▶ Run Step 6"):
 
     df["Cluster_Description"] = df["Cluster"].map(summary)
 
-    st.session_state.data = df
+    save_state(df)
+st.session_state.data = df
     set_status("step6", "Done")
 
 if col2.button("⏭ Skip Step 6"):
