@@ -88,10 +88,48 @@ def generate_cluster_summary(df):
     df["Cluster_Description"] = df["Cluster"].map(summary)
     return df
 
+from openpyxl import Workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.styles import Font
+
 def to_excel(df):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Output"
+
+    # write dataframe rows
+    for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
+        for c_idx, value in enumerate(row, 1):
+
+            cell = ws.cell(row=r_idx, column=c_idx)
+
+            # header row
+            if r_idx == 1:
+                cell.value = value
+                continue
+
+            # preserve hyperlinks
+            if isinstance(value, str) and value.startswith(("http://", "https://")):
+                cell.value = value
+                cell.hyperlink = value
+                cell.font = Font(color="0000FF", underline="single")
+            else:
+                cell.value = value
+
+    # auto column width (optional nice touch)
+    for col in ws.columns:
+        max_len = 0
+        col_letter = col[0].column_letter
+        for cell in col:
+            try:
+                if cell.value:
+                    max_len = max(max_len, len(str(cell.value)))
+            except:
+                pass
+        ws.column_dimensions[col_letter].width = min(max_len + 2, 60)
+
     buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False)
+    wb.save(buffer)
     buffer.seek(0)
     return buffer
 
