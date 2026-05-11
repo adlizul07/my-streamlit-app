@@ -364,38 +364,47 @@ def to_excel(df):
     buffer = BytesIO()
 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+
         df.to_excel(writer, index=False, sheet_name="Sheet1")
 
         workbook = writer.book
         sheet = writer.sheets["Sheet1"]
 
-# ======================================
-# RESTORE HYPERLINKS (HEADLINE ONLY)
-# ======================================
-if "Headline" in df.columns:
+        # ======================================
+        # RESTORE HYPERLINKS (HEADLINE ONLY)
+        # ======================================
+        if "Headline" in df.columns and "Headline_Link" in df.columns:
 
-    col_idx = list(df.columns).index("Headline") + 1
+            col_idx = list(df.columns).index("Headline") + 1
 
-    for row_idx, row in enumerate(df.itertuples(index=False), start=2):
+            for row_idx in range(len(df)):
 
-        cell = sheet.cell(row=row_idx, column=col_idx)
+                link = df.iloc[row_idx]["Headline_Link"]
 
+                if (
+                    pd.notna(link)
+                    and isinstance(link, str)
+                    and link.startswith(("http://", "https://"))
+                ):
+
+                    cell = sheet.cell(
+                        row=row_idx + 2,
+                        column=col_idx
+                    )
+
+                    cell.hyperlink = link
+                    cell.style = "Hyperlink"
+
+        # remove helper column from export
         if "Headline_Link" in df.columns:
-            link = df.iloc[row_idx - 2]["Headline_Link"]
-        else:
-            link = getattr(row, "Headline", None)
 
-        if (
-            pd.notna(link)
-            and isinstance(link, str)
-            and link.startswith(("http://", "https://"))
-        ):
-            cell.hyperlink = link
-            cell.style = "Hyperlink"
+            helper_col = list(df.columns).index("Headline_Link") + 1
+
+            sheet.delete_cols(helper_col)
 
     buffer.seek(0)
-    return buffer
 
+    return buffer
 
 st.download_button(
     "📥 Download Excel",
