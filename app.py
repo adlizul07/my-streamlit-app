@@ -103,8 +103,42 @@ def to_excel(df):
 # LOAD FILE (HYPERLINK SAFE)
 # ==========================================
 def load_excel(file, sheet):
-    return pd.read_excel(file, sheet_name=sheet)
 
+    wb = load_workbook(file, data_only=False)
+    ws = wb[sheet]
+
+    headers = [cell.value for cell in ws[1]]
+
+    rows = []
+
+    for row in ws.iter_rows(min_row=2):
+
+        row_data = []
+
+        for cell in row:
+            row_data.append(cell.value)
+
+        rows.append(row_data)
+
+    df = pd.DataFrame(rows, columns=headers)
+
+    # ======================================
+    # SAVE HEADLINE HYPERLINKS
+    # ======================================
+    if "Headline" in df.columns:
+
+        df["Headline_Link"] = None
+
+        headline_col_idx = list(df.columns).index("Headline")
+
+        for i, row in enumerate(ws.iter_rows(min_row=2)):
+
+            cell = row[headline_col_idx]
+
+            if cell.hyperlink:
+                df.loc[i, "Headline_Link"] = cell.hyperlink.target
+
+    return df
 
 # ==========================================
 # UI
@@ -316,11 +350,48 @@ st.write(f"Status: {icon(get_status('step6'))} {get_status('step6')}")
 
 
 # ==========================================
-# OUTPUT
+# OUTPUT (HYPERLINK PRESERVE FIX)
 # ==========================================
 st.markdown("---")
 
+from openpyxl import Workbook
+
 filename = st.text_input("Output filename", "output.xlsx")
+
+
+def to_excel(df):
+
+    buffer = BytesIO()
+
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Sheet1")
+
+        workbook = writer.book
+        sheet = writer.sheets["Sheet1"]
+
+        # ======================================
+        # RESTORE HYPERLINKS (HEADLINE ONLY)
+        # ======================================
+        if "Headline" in df.columns:
+
+   	 col_idx = list(df.columns).index("Headline") + 1
+
+   	 for row_idx, row in enumerate(df.itertuples(index=False), start=2):
+
+     	   cell = sheet.cell(row=row_idx, column=col_idx)
+
+      	  if "Headline_Link" in df.columns:
+            link = df.iloc[row_idx - 2]["Headline_Link"]
+      	  else:
+            link = getattr(row, "Headline", None)
+
+     	   if pd.notna(link) and isinstance(link, str) and link.startswith(("http://", "https://")):
+       	     cell.hyperlink = link
+       	     cell.style = "Hyperlink"
+
+    buffer.seek(0)
+    return buffer
+
 
 st.download_button(
     "📥 Download Excel",
