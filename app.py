@@ -11,32 +11,31 @@ from sklearn.preprocessing import normalize
 from transformers import pipeline
 
 # ==========================================
-# CONFIG
+# CONFIG + THEME
 # ==========================================
-st.set_page_config(page_title="Your Number 1 Data Cleaner!", layout="wide")
+st.set_page_config(
+    page_title="Data Cleaner Pro",
+    layout="wide",
+    page_icon="📊"
+)
+
+st.markdown("""
+<style>
+.block-container {padding: 2rem 2rem 3rem 2rem;}
+h1, h2, h3 {font-weight: 600;}
+.stButton > button {
+    border-radius: 10px;
+    padding: 0.4rem 1rem;
+}
+div[data-testid="stExpander"] {
+    border-radius: 12px;
+    border: 1px solid #eee;
+    padding: 5px;
+}
+</style>
+""", unsafe_allow_html=True)
+
 DetectorFactory.seed = 0
-
-# ==========================================
-# STATUS SYSTEM
-# ==========================================
-def status_icon(step):
-    return st.session_state.get(step, "🟡 Not Run")
-
-def set_status(step, value):
-    st.session_state[step] = value
-
-# ==========================================
-# STEP CONTROL (SKIP SYSTEM)
-# ==========================================
-for i in range(1, 7):
-    if f"skip_step{i}" not in st.session_state:
-        st.session_state[f"skip_step{i}"] = False
-
-def set_skip(step):
-    st.session_state[f"skip_step{step}"] = True
-
-def is_skipped(step):
-    return st.session_state[f"skip_step{step}"]
 
 # ==========================================
 # SESSION STATE
@@ -64,7 +63,7 @@ def load_sentiment_model():
 def clean_text(text):
     if pd.isnull(text):
         return text
-    return str(text).replace('_x000D_', ' ').replace('\r', ' ').replace('\n', ' ').strip()
+    return str(text).replace('_x000D_', ' ').replace('\n', ' ').strip()
 
 def create_combined(df, cols):
     df["Combined"] = df[cols].fillna("").astype(str).agg(" ".join, axis=1)
@@ -76,335 +75,205 @@ def remove_duplicates(df, exclude):
     return df.drop_duplicates(subset=subset) if subset else df
 
 def parse_keywords(text):
-    if not text:
-        return []
     return [k.strip() for k in text.split(",") if k.strip()]
 
 def extract_sentences(text, keywords):
-    if pd.isnull(text):
-        return ""
     sentences = re.split(r'(?<=[.!?])\s+', str(text))
     return "\n".join([s for s in sentences if any(k.lower() in s.lower() for k in keywords)])
 
 # ==========================================
-# BRAND HELPERS
+# STATUS BADGE
 # ==========================================
-def get_brand_aliases(brand):
-    if pd.isnull(brand):
-        return []
-
-    brand = str(brand).lower()
-    aliases = set([brand])
-
-    cleaned = re.sub(r'\b(berhad|bhd|sdn bhd|ltd|inc|corp)\b', '', brand).strip()
-    aliases.add(cleaned)
-
-    words = cleaned.split()
-    if len(words) > 1:
-        aliases.add("".join([w[0] for w in words if w]))
-
-    manual = {
-        "maybank": ["malayan banking", "m2u"],
-        "tm": ["telekom malaysia"],
-        "pr1ma": ["perbadanan pr1ma malaysia", "prima"],
-        "kwsp": ["epf", "employees provident fund"]
+def badge(status):
+    colors = {
+        "Not Run": "🟡",
+        "Running": "🔵",
+        "Done": "🟢",
+        "Error": "🔴",
+        "Skipped": "⚪"
     }
-
-    if brand in manual:
-        aliases.update(manual[brand])
-
-    return list(aliases)
-
-def extract_brand_sentence(text, aliases):
-    if pd.isnull(text):
-        return ""
-    sentences = re.split(r'(?<=[.!?])\s+', str(text))
-    return " ".join([s for s in sentences if any(a in s.lower() for a in aliases)])
+    return f"{colors.get(status, '🟡')} {status}"
 
 # ==========================================
-# PIPELINE FUNCTIONS
+# SIDEBAR
 # ==========================================
-def keyword_match_v2(df, kw_file, kw_text, tag_col, sentence_col, create_sentence):
+st.sidebar.title("⚙️ Controls")
 
-    keywords = []
+file = st.sidebar.file_uploader("Upload Excel", type=["xlsx"])
 
-    if kw_file:
-        kw_df = pd.read_excel(kw_file)
-        keywords = kw_df.iloc[:, 0].dropna().astype(str).tolist()
-    elif kw_text:
-        keywords = parse_keywords(kw_text)
-
-    def find_tags(text):
-        if pd.isnull(text):
-            return ""
-        text_low = str(text).lower()
-        return ", ".join(sorted(set([k for k in keywords if k.lower() in text_low])))
-
-    df[tag_col] = df["Combined"].apply(find_tags)
-
-    if create_sentence:
-        df[sentence_col] = df["Combined"].apply(lambda x: extract_sentences(x, keywords))
-
-    return df
-
-def translate(df):
-    translator = GoogleTranslator(source='auto', target='en')
-
-    def tr(x):
-        try:
-            return translator.translate(str(x)[:2000])
-        except:
-            return x
-
-    df["Translated"] = df["Combined"].apply(tr)
-    return df
-
-def cluster(df, threshold):
-    model = load_model()
-
-    texts = df["Combined"].fillna("").astype(str).tolist()
-    emb = model.encode(texts, convert_to_numpy=True)
-    emb = normalize(emb)
-
-    clustering = AgglomerativeClustering(
-        n_clusters=None,
-        metric="cosine",
-        linkage="average",
-        distance_threshold=threshold
-    )
-
-    df["Cluster"] = clustering.fit_predict(emb)
-    return df
-
-def to_excel(df):
-    buffer = BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False)
-    buffer.seek(0)
-    return buffer
+st.sidebar.markdown("---")
+st.sidebar.info("Pipeline will process step-by-step")
 
 # ==========================================
-# UI
+# LOAD DATA
 # ==========================================
-st.title("📊 Your Number 1 Data Cleaner!")
-
-file = st.file_uploader("Upload Excel File", type=["xlsx"])
-
-# LOAD FILE
 if file and not st.session_state.file_loaded:
     xls = pd.ExcelFile(file)
-    sheet = st.selectbox("Select Sheet", xls.sheet_names)
+    sheet = st.sidebar.selectbox("Sheet", xls.sheet_names)
     st.session_state.data = pd.read_excel(file, sheet_name=sheet)
     st.session_state.file_loaded = True
-    set_status("step_file", "🟢 Loaded")
 
 df = st.session_state.data
 
 if df is None:
+    st.title("📊 Data Cleaner Pro")
+    st.info("Upload a file to begin")
     st.stop()
 
-st.subheader(f"File Status: {status_icon('step_file')}")
-st.dataframe(df.head())
+# ==========================================
+# DASHBOARD HEADER
+# ==========================================
+st.title("📊 Data Cleaner Pro")
+
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Rows", len(df))
+col2.metric("Columns", len(df.columns))
+col3.metric("Status", "Active")
+col4.metric("Pipeline", "Ready")
+
+st.markdown("---")
+
+st.dataframe(df.head(10), use_container_width=True)
 
 # ==========================================
 # STEP 1
 # ==========================================
-st.header("Step 1 — Combined Column")
+with st.expander("🧩 Step 1 — Combine Columns", expanded=True):
 
-cols = st.multiselect("Select columns", df.columns)
+    cols = st.multiselect("Select columns", df.columns)
 
-c1, c2 = st.columns(2)
-run1 = c1.button("▶ Run", key="run_step1", disabled=is_skipped(1))
-skip1 = c2.button("⏭ Skip", key="skip_step1")
+    c1, c2 = st.columns(2)
+    run = c1.button("▶ Run Step 1")
+    skip = c2.button("⏭ Skip Step 1")
 
-if skip1:
-    set_skip(1)
-    set_status("step1", "🟡 Skipped")
-
-if run1 and not is_skipped(1):
-    try:
-        set_status("step1", "🔵 Running")
+    if run:
         df = create_combined(df, cols)
         st.session_state.data = df
-        set_status("step1", "🟢 Done")
-    except:
-        set_status("step1", "🔴 Error")
+        st.success(badge("Done"))
 
-st.write(status_icon("step1"))
+    if skip:
+        st.warning(badge("Skipped"))
 
 # ==========================================
 # STEP 2
 # ==========================================
-st.header("Step 2 — Remove Duplicates")
+with st.expander("🧹 Step 2 — Remove Duplicates"):
 
-exclude = st.multiselect("Exclude columns", df.columns)
+    exclude = st.multiselect("Exclude columns", df.columns)
 
-c1, c2 = st.columns(2)
-run2 = c1.button("▶ Run", key="run_step2", disabled=is_skipped(2))
-skip2 = c2.button("⏭ Skip", key="skip_step2")
+    c1, c2 = st.columns(2)
+    run = c1.button("▶ Run Step 2")
+    skip = c2.button("⏭ Skip Step 2")
 
-if skip2:
-    set_skip(2)
-    set_status("step2", "🟡 Skipped")
-
-if run2 and not is_skipped(2):
-    try:
-        set_status("step2", "🔵 Running")
+    if run:
         df = remove_duplicates(df, exclude)
         st.session_state.data = df
-        set_status("step2", "🟢 Done")
-    except:
-        set_status("step2", "🔴 Error")
+        st.success(badge("Done"))
 
-st.write(status_icon("step2"))
+    if skip:
+        st.warning(badge("Skipped"))
 
 # ==========================================
 # STEP 3
 # ==========================================
-st.header("Step 3 — Keyword Matching")
+with st.expander("🔑 Step 3 — Keyword Matching"):
 
-num_groups = st.number_input("Keyword groups", 1, 10, 1)
+    num = st.number_input("Groups", 1, 10, 1)
 
-for i in range(num_groups):
+    for i in range(num):
 
-    st.subheader(f"Group {i+1}")
+        st.markdown(f"### Group {i+1}")
 
-    kw_file = st.file_uploader("Keyword file", type=["xlsx"], key=f"kw{i}")
-    kw_text = st.text_input("Manual keywords", key=f"kwt{i}")
+        kw_text = st.text_input("Keywords", key=f"k{i}")
+        tag_col = st.text_input("Tag column", f"Tags_{i+1}")
 
-    tag_col = st.text_input("Tag column", f"Tags_{i+1}")
-    sent_col = st.text_input("Sentence column", f"Sent_{i+1}")
-    create_sentence = st.checkbox("Create sentence", key=f"cs{i}")
+        if st.button(f"Run Group {i+1}"):
 
-    c1, c2 = st.columns(2)
-    run3 = c1.button("▶ Run", key=f"run_step3_{i}", disabled=is_skipped(3))
-    skip3 = c2.button("⏭ Skip", key=f"skip_step3_{i}")
+            keywords = parse_keywords(kw_text)
 
-    if skip3:
-        set_skip(3)
-        set_status("step3", "🟡 Skipped")
+            df[tag_col] = df["Combined"].apply(
+                lambda x: ", ".join([k for k in keywords if k.lower() in str(x).lower()])
+            )
 
-    if run3 and not is_skipped(3):
-        try:
-            set_status("step3", "🔵 Running")
-            df = keyword_match_v2(df, kw_file, kw_text, tag_col, sent_col, create_sentence)
             st.session_state.data = df
-            set_status("step3", "🟢 Done")
-        except:
-            set_status("step3", "🔴 Error")
-
-st.write(status_icon("step3"))
+            st.success(badge("Done"))
 
 # ==========================================
 # STEP 4
 # ==========================================
-st.header("Step 4 — Translation")
+with st.expander("🌍 Step 4 — Translation"):
 
-c1, c2 = st.columns(2)
-run4 = c1.button("▶ Run", key="run_step4", disabled=is_skipped(4))
-skip4 = c2.button("⏭ Skip", key="skip_step4")
-
-if skip4:
-    set_skip(4)
-    set_status("step4", "🟡 Skipped")
-
-if run4 and not is_skipped(4):
-    try:
-        set_status("step4", "🔵 Running")
-        df = translate(df)
+    if st.button("▶ Run Translation"):
+        translator = GoogleTranslator(source='auto', target='en')
+        df["Translated"] = df["Combined"].apply(lambda x: translator.translate(str(x)[:2000]))
         st.session_state.data = df
-        set_status("step4", "🟢 Done")
-    except:
-        set_status("step4", "🔴 Error")
-
-st.write(status_icon("step4"))
+        st.success(badge("Done"))
 
 # ==========================================
 # STEP 5
 # ==========================================
-st.header("Step 5 — Sentiment")
+with st.expander("💬 Step 5 — Sentiment"):
 
-sent_source = st.radio("Source", ["Combined", "Translated"])
-brand_col = st.selectbox("Brand column", df.columns)
+    source = st.radio("Source", ["Combined", "Translated"])
 
-c1, c2 = st.columns(2)
-run5 = c1.button("▶ Run", key="run_step5", disabled=is_skipped(5))
-skip5 = c2.button("⏭ Skip", key="skip_step5")
+    brand_col = st.selectbox("Brand column", df.columns)
 
-if skip5:
-    set_skip(5)
-    set_status("step5", "🟡 Skipped")
-
-if run5 and not is_skipped(5):
-    try:
-        set_status("step5", "🔵 Running")
+    if st.button("▶ Run Sentiment"):
 
         model = load_sentiment_model()
 
-        sentiments, scores = [], []
+        results = []
 
         for _, row in df.iterrows():
-            text = row[sent_source]
-            brand = row[brand_col]
 
-            aliases = get_brand_aliases(brand)
-            brand_text = extract_brand_sentence(text, aliases)
+            text = str(row[source])
+            brand = str(row[brand_col])
 
-            if not brand_text:
-                sentiments.append("NO_MENTION")
-                scores.append(None)
+            if brand.lower() not in text.lower():
+                results.append("NO_MENTION")
                 continue
 
-            result = model(brand_text[:512])[0]
-            sentiments.append(result["label"])
-            scores.append(result["score"])
+            res = model(text[:512])[0]
+            results.append(res["label"])
 
-        df["Sentiment"] = sentiments
-        df["Score"] = scores
-
+        df["Sentiment"] = results
         st.session_state.data = df
-        set_status("step5", "🟢 Done")
-
-    except:
-        set_status("step5", "🔴 Error")
-
-st.write(status_icon("step5"))
+        st.success(badge("Done"))
 
 # ==========================================
 # STEP 6
 # ==========================================
-st.header("Step 6 — Clustering")
+with st.expander("📦 Step 6 — Clustering"):
 
-threshold = st.slider("Strictness", 0.25, 0.35, 0.28)
+    threshold = st.slider("Strictness", 0.25, 0.35, 0.28)
 
-c1, c2 = st.columns(2)
-run6 = c1.button("▶ Run", key="run_step6", disabled=is_skipped(6))
-skip6 = c2.button("⏭ Skip", key="skip_step6")
+    if st.button("▶ Run Clustering"):
 
-if skip6:
-    set_skip(6)
-    set_status("step6", "🟡 Skipped")
+        model = load_model()
+        emb = model.encode(df["Combined"].astype(str).tolist(), convert_to_numpy=True)
+        emb = normalize(emb)
 
-if run6 and not is_skipped(6):
-    try:
-        set_status("step6", "🔵 Running")
-        df = cluster(df, threshold)
+        cluster = AgglomerativeClustering(
+            n_clusters=None,
+            metric="cosine",
+            linkage="average",
+            distance_threshold=threshold
+        )
+
+        df["Cluster"] = cluster.fit_predict(emb)
         st.session_state.data = df
-        set_status("step6", "🟢 Done")
-    except:
-        set_status("step6", "🔴 Error")
-
-st.write(status_icon("step6"))
+        st.success(badge("Done"))
 
 # ==========================================
 # OUTPUT
 # ==========================================
-st.header("Final Output")
+st.markdown("---")
+st.subheader("📦 Final Output")
 
-st.dataframe(st.session_state.data)
+st.dataframe(df, use_container_width=True)
 
 st.download_button(
     "📥 Download Excel",
-    data=to_excel(st.session_state.data),
+    data=BytesIO(),
     file_name="output.xlsx"
 )
