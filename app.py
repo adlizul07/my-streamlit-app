@@ -161,7 +161,7 @@ def to_excel(df):
 # ==========================================
 # UI
 # ==========================================
-st.title("📊 Data Cleaning & NLP Pipeline")
+st.title("📊 Your Number 1 Data Cleaner!")
 
 file = st.file_uploader("Upload Excel File", type=["xlsx"])
 
