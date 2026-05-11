@@ -196,15 +196,30 @@ st.write(f"Status: {icon(get_status('step2'))} {get_status('step2')}")
 show_preview("step2", df)
 
 # ==========================================
-# STEP 3
+# STEP 3 — MULTI KEYWORD GROUP MATCHING
 # ==========================================
-st.header(f"{icon(get_status('step3'))} Step 3 — Keyword Matching")
+st.header(f"{icon(get_status('step3'))} Step 3 — Keyword Matching (Multi-Group)")
+
+if "keyword_groups" not in st.session_state:
+    st.session_state.keyword_groups = []
 
 mode = st.radio(
     "Choose keyword input method",
     ["Upload File", "Manual Input"],
     horizontal=True
 )
+
+# ==========================================
+# ADD NEW GROUP
+# ==========================================
+st.subheader("➕ Add Keyword Group")
+
+group_name = st.text_input("Group Name", "Group1")
+
+tag_col = st.text_input("Output Column Name", "Tags")
+
+extract_sent = st.checkbox("Extract sentences?")
+sent_col = st.text_input("Sentence column", "Sent")
 
 keywords = []
 display_map = {}
@@ -220,36 +235,32 @@ if mode == "Upload File":
 
     if kw_file:
         preview_kw_df = pd.read_excel(kw_file)
-        st.write("Keyword File Preview")
         st.dataframe(preview_kw_df.head())
 
         if len(preview_kw_df.columns) > 1:
-            keyword_col = st.selectbox("Select keyword column", preview_kw_df.columns)
-            display_col = st.selectbox("Select display/output column", preview_kw_df.columns)
+            keyword_col = st.selectbox("Keyword column", preview_kw_df.columns)
+            display_col = st.selectbox("Display column", preview_kw_df.columns)
         else:
             keyword_col = preview_kw_df.columns[0]
             display_col = preview_kw_df.columns[0]
 
 else:
-    kw_text = st.text_input("Enter keywords (comma separated)")
+    kw_text = st.text_area("Enter keywords (comma separated)")
 
-tag_col = st.text_input("Tag column", "Tags")
-extract_sent = st.checkbox("Extract sentences?")
-sent_col = st.text_input("Sentence column", "Sent")
-
+# ==========================================
+# EXACT MATCH (CASE INSENSITIVE)
+# ==========================================
 def exact_keyword_match(text, keyword):
-    pattern = r'(?i)(?<!\w)' + re.escape(keyword) + r'(?!\w)'
-    return re.search(pattern, str(text)) is not None
+    text_tokens = re.findall(r'\b\w+\b', str(text).lower())
+    return keyword.lower() in text_tokens
 
-col1, col2 = st.columns(2)
-
-if col1.button("▶ Run Step 3"):
-    set_status("step3", "Running")
-
+# ==========================================
+# ADD GROUP BUTTON
+# ==========================================
+if st.button("➕ Add This Keyword Group"):
+    
     if mode == "Upload File" and kw_file:
-        kw_df = pd.read_excel(kw_file)
-        kw_df = kw_df.dropna(subset=[keyword_col])
-
+        kw_df = pd.read_excel(kw_file).dropna(subset=[keyword_col])
         keywords = kw_df[keyword_col].astype(str).tolist()
         display_values = kw_df[display_col].astype(str).tolist()
         display_map = dict(zip(keywords, display_values))
@@ -259,29 +270,54 @@ if col1.button("▶ Run Step 3"):
         display_map = {k: k for k in keywords}
 
     else:
-        st.error("Please provide keyword input")
-        set_status("step3", "Error")
+        st.error("Please provide keywords")
         st.stop()
 
-    def get_matches(text):
-        matched = []
-        for k in keywords:
-            if exact_keyword_match(text, k):
-                matched.append(display_map[k])
-        return ", ".join(matched)
+    st.session_state.keyword_groups.append({
+        "group": group_name,
+        "keywords": keywords,
+        "map": display_map,
+        "output_col": tag_col
+    })
 
-    df[tag_col] = df["Combined"].apply(get_matches)
+    st.success(f"Added group: {group_name}")
 
+# ==========================================
+# SHOW GROUPS
+# ==========================================
+st.write("### 📦 Current Keyword Groups")
+st.json(st.session_state.keyword_groups)
+
+# ==========================================
+# RUN ALL GROUPS
+# ==========================================
+if st.button("▶ Run All Keyword Groups"):
+
+    set_status("step3", "Running")
+
+    for g in st.session_state.keyword_groups:
+
+        def get_matches(text):
+            matched = []
+            for k in g["keywords"]:
+                if exact_keyword_match(text, k):
+                    matched.append(g["map"][k])
+            return ", ".join(matched)
+
+        df[g["output_col"]] = df["Combined"].apply(get_matches)
+
+    # sentence extraction (optional global)
     if extract_sent:
         def extract_matching_sentences(text):
             sentences = re.split(r'(?<=[.!?])\s+', str(text))
             matched_sentences = []
 
             for s in sentences:
-                for k in keywords:
-                    if exact_keyword_match(s, k):
-                        matched_sentences.append(s)
-                        break
+                for g in st.session_state.keyword_groups:
+                    for k in g["keywords"]:
+                        if exact_keyword_match(s, k):
+                            matched_sentences.append(s)
+                            break
 
             return " ".join(matched_sentences)
 
