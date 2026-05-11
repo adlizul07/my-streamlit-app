@@ -54,10 +54,8 @@ def icon(status):
 # PREVIEW FUNCTION
 # ==========================================
 def show_preview(step, df):
-
     if get_status(step) == "Done":
         st.dataframe(df.head(), use_container_width=True)
-
 
 # ==========================================
 # MODELS
@@ -69,7 +67,6 @@ def load_model():
 @st.cache_resource
 def load_sentiment():
     return pipeline("sentiment-analysis", model="ProsusAI/finbert")
-
 
 # ==========================================
 # HELPERS
@@ -106,12 +103,10 @@ def to_excel(df):
     buffer.seek(0)
     return buffer
 
-
 # ==========================================
 # LOAD FILE (HYPERLINK SAFE)
 # ==========================================
 def load_excel(file, sheet):
-
     wb = load_workbook(file, data_only=False)
     ws = wb[sheet]
 
@@ -120,29 +115,19 @@ def load_excel(file, sheet):
     rows = []
 
     for row in ws.iter_rows(min_row=2):
-
         row_data = []
-
         for cell in row:
             row_data.append(cell.value)
-
         rows.append(row_data)
 
     df = pd.DataFrame(rows, columns=headers)
 
-    # ======================================
-    # SAVE HEADLINE HYPERLINKS
-    # ======================================
     if "Headline" in df.columns:
-
         df["Headline_Link"] = None
-
         headline_col_idx = list(df.columns).index("Headline")
 
         for i, row in enumerate(ws.iter_rows(min_row=2)):
-
             cell = row[headline_col_idx]
-
             if cell.hyperlink:
                 df.loc[i, "Headline_Link"] = cell.hyperlink.target
 
@@ -168,7 +153,6 @@ if df is None:
 
 st.dataframe(df.head(), use_container_width=True)
 
-
 # ==========================================
 # STEP 1
 # ==========================================
@@ -177,7 +161,6 @@ st.header(f"{icon(get_status('step1'))} Step 1 — Combine Columns")
 cols = st.multiselect("Select columns", df.columns)
 
 if st.button("▶ Run Step 1"):
-
     if cols:
         set_status("step1", "Running")
         df = create_combined(df, cols)
@@ -188,9 +171,8 @@ if st.button("▶ Run Step 1"):
 
 st.write(f"Status: {icon(get_status('step1'))} {get_status('step1')}")
 
-
 # ==========================================
-# STEP 2 (FIXED DROPDOWN EXCLUDE)
+# STEP 2
 # ==========================================
 st.header(f"{icon(get_status('step2'))} Step 2 — Remove Duplicates")
 
@@ -202,7 +184,6 @@ exclude_cols = st.multiselect(
 col1, col2 = st.columns(2)
 
 if col1.button("▶ Run Step 2"):
-
     set_status("step2", "Running")
     df = remove_duplicates(df, exclude_cols)
     st.session_state.data = df
@@ -212,12 +193,10 @@ if col2.button("⏭ Skip Step 2"):
     set_status("step2", "Skipped")
 
 st.write(f"Status: {icon(get_status('step2'))} {get_status('step2')}")
-
 show_preview("step2", df)
 
-
 # ==========================================
-# STEP 3 (FIXED INPUT MODE)
+# STEP 3
 # ==========================================
 st.header(f"{icon(get_status('step3'))} Step 3 — Keyword Matching")
 
@@ -228,46 +207,85 @@ mode = st.radio(
 )
 
 keywords = []
+display_map = {}
 
 kw_file = None
 kw_text = ""
 
+keyword_col = None
+display_col = None
+
 if mode == "Upload File":
     kw_file = st.file_uploader("Upload keyword Excel file", type=["xlsx"])
+
+    if kw_file:
+        preview_kw_df = pd.read_excel(kw_file)
+        st.write("Keyword File Preview")
+        st.dataframe(preview_kw_df.head())
+
+        if len(preview_kw_df.columns) > 1:
+            keyword_col = st.selectbox("Select keyword column", preview_kw_df.columns)
+            display_col = st.selectbox("Select display/output column", preview_kw_df.columns)
+        else:
+            keyword_col = preview_kw_df.columns[0]
+            display_col = preview_kw_df.columns[0]
+
 else:
     kw_text = st.text_input("Enter keywords (comma separated)")
-
 
 tag_col = st.text_input("Tag column", "Tags")
 extract_sent = st.checkbox("Extract sentences?")
 sent_col = st.text_input("Sentence column", "Sent")
 
+def exact_keyword_match(text, keyword):
+    pattern = r'(?i)(?<!\w)' + re.escape(keyword) + r'(?!\w)'
+    return re.search(pattern, str(text)) is not None
+
 col1, col2 = st.columns(2)
 
 if col1.button("▶ Run Step 3"):
-
     set_status("step3", "Running")
 
     if mode == "Upload File" and kw_file:
         kw_df = pd.read_excel(kw_file)
-        keywords = kw_df.iloc[:, 0].dropna().astype(str).tolist()
+        kw_df = kw_df.dropna(subset=[keyword_col])
+
+        keywords = kw_df[keyword_col].astype(str).tolist()
+        display_values = kw_df[display_col].astype(str).tolist()
+        display_map = dict(zip(keywords, display_values))
 
     elif mode == "Manual Input" and kw_text:
         keywords = [k.strip() for k in kw_text.split(",") if k.strip()]
+        display_map = {k: k for k in keywords}
 
     else:
         st.error("Please provide keyword input")
         set_status("step3", "Error")
         st.stop()
 
-    df[tag_col] = df["Combined"].apply(
-        lambda x: ", ".join([k for k in keywords if k.lower() in str(x).lower()])
-    )
+    def get_matches(text):
+        matched = []
+        for k in keywords:
+            if exact_keyword_match(text, k):
+                matched.append(display_map[k])
+        return ", ".join(matched)
+
+    df[tag_col] = df["Combined"].apply(get_matches)
 
     if extract_sent:
-        df[sent_col] = df["Combined"].apply(
-            lambda x: extract_sentences(x, keywords)
-        )
+        def extract_matching_sentences(text):
+            sentences = re.split(r'(?<=[.!?])\s+', str(text))
+            matched_sentences = []
+
+            for s in sentences:
+                for k in keywords:
+                    if exact_keyword_match(s, k):
+                        matched_sentences.append(s)
+                        break
+
+            return " ".join(matched_sentences)
+
+        df[sent_col] = df["Combined"].apply(extract_matching_sentences)
 
     st.session_state.data = df
     set_status("step3", "Done")
@@ -276,9 +294,14 @@ if col2.button("⏭ Skip Step 3"):
     set_status("step3", "Skipped")
 
 st.write(f"Status: {icon(get_status('step3'))} {get_status('step3')}")
-
 show_preview("step3", df)
 
+# ==========================================
+# STEP 4 SAFETY FIX
+# ==========================================
+if "Combined" not in df.columns:
+    st.warning("Please complete Step 1 first")
+    st.stop()
 
 # ==========================================
 # STEP 4
@@ -288,11 +311,9 @@ st.header(f"{icon(get_status('step4'))} Step 4 — Translation")
 col1, col2 = st.columns(2)
 
 if col1.button("▶ Run Step 4"):
-
     set_status("step4", "Running")
 
     translator = GoogleTranslator(source="auto", target="en")
-
     df["Translated"] = df["Combined"].apply(
         lambda x: translator.translate(str(x)[:2000])
     )
@@ -300,11 +321,10 @@ if col1.button("▶ Run Step 4"):
     st.session_state.data = df
     set_status("step4", "Done")
 
-st.write(f"Status: {icon(get_status('step4'))} {get_status('step4')}")
-
 if col2.button("⏭ Skip Step 4"):
     set_status("step4", "Skipped")
 
+st.write(f"Status: {icon(get_status('step4'))} {get_status('step4')}")
 show_preview("step4", df)
 
 # ==========================================
@@ -318,15 +338,13 @@ brand_col = st.selectbox("Brand column", df.columns)
 col1, col2 = st.columns(2)
 
 if col1.button("▶ Run Step 5"):
-
     set_status("step5", "Running")
 
     model = load_sentiment()
-
     results = []
 
     for _, row in df.iterrows():
-        text = str(row[source])
+        text = str(row[source]) if pd.notna(row[source]) else ""
 
         if str(row[brand_col]).lower() not in text.lower():
             results.append("NO_MENTION")
@@ -337,11 +355,10 @@ if col1.button("▶ Run Step 5"):
     st.session_state.data = df
     set_status("step5", "Done")
 
-st.write(f"Status: {icon(get_status('step5'))} {get_status('step5')}")
-
 if col2.button("⏭ Skip Step 5"):
     set_status("step5", "Skipped")
 
+st.write(f"Status: {icon(get_status('step5'))} {get_status('step5')}")
 show_preview("step5", df)
 
 # ==========================================
@@ -354,7 +371,6 @@ threshold = st.slider("Strictness", 0.25, 0.35, 0.28)
 col1, col2 = st.columns(2)
 
 if col1.button("▶ Run Step 6"):
-
     set_status("step6", "Running")
 
     model = load_model()
@@ -372,7 +388,6 @@ if col1.button("▶ Run Step 6"):
 
     df["Cluster"] = clustering.fit_predict(emb)
 
-    # simple summary
     summary = {}
     for c in df["Cluster"].unique():
         summary[c] = " | ".join(df[df["Cluster"] == c]["Combined"].head(3).tolist())
@@ -382,37 +397,28 @@ if col1.button("▶ Run Step 6"):
     st.session_state.data = df
     set_status("step6", "Done")
 
-st.write(f"Status: {icon(get_status('step6'))} {get_status('step6')}")
-
 if col2.button("⏭ Skip Step 6"):
     set_status("step6", "Skipped")
 
+st.write(f"Status: {icon(get_status('step6'))} {get_status('step6')}")
 show_preview("step6", df)
 
 # ==========================================
-# OUTPUT (HYPERLINK PRESERVE FIX)
+# OUTPUT
 # ==========================================
 st.markdown("---")
 
-from openpyxl import Workbook
-
 filename = st.text_input("Output filename", "output.xlsx")
 
-
 def to_excel(df):
-
     buffer = BytesIO()
 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-
         df.to_excel(writer, index=False, sheet_name="Sheet1")
 
         workbook = writer.book
         sheet = writer.sheets["Sheet1"]
 
-        # ======================================
-        # RESTORE HYPERLINKS (HEADLINE ONLY)
-        # ======================================
         if "Headline" in df.columns and "Headline_Link" in df.columns:
 
             col_idx = list(df.columns).index("Headline") + 1
@@ -426,24 +432,15 @@ def to_excel(df):
                     and isinstance(link, str)
                     and link.startswith(("http://", "https://"))
                 ):
-
-                    cell = sheet.cell(
-                        row=row_idx + 2,
-                        column=col_idx
-                    )
-
+                    cell = sheet.cell(row=row_idx + 2, column=col_idx)
                     cell.hyperlink = link
                     cell.style = "Hyperlink"
 
-        # remove helper column from export
         if "Headline_Link" in df.columns:
-
             helper_col = list(df.columns).index("Headline_Link") + 1
-
             sheet.delete_cols(helper_col)
 
     buffer.seek(0)
-
     return buffer
 
 st.download_button(
