@@ -17,13 +17,26 @@ st.set_page_config(page_title="Your Number 1 Data Cleaner!", layout="wide")
 DetectorFactory.seed = 0
 
 # ==========================================
-# STATUS TRACKER
+# STATUS SYSTEM
 # ==========================================
 def status_icon(step):
     return st.session_state.get(step, "🟡 Not Run")
 
 def set_status(step, value):
     st.session_state[step] = value
+
+# ==========================================
+# STEP SKIP CONTROL
+# ==========================================
+for i in range(1, 7):
+    if f"skip_step{i}" not in st.session_state:
+        st.session_state[f"skip_step{i}"] = False
+
+def set_skip(step):
+    st.session_state[f"skip_step{step}"] = True
+
+def is_skipped(step):
+    return st.session_state[f"skip_step{step}"]
 
 # ==========================================
 # SESSION STATE
@@ -43,10 +56,7 @@ def load_model():
 
 @st.cache_resource
 def load_sentiment_model():
-    return pipeline(
-        "sentiment-analysis",
-        model="ProsusAI/finbert"
-    )
+    return pipeline("sentiment-analysis", model="ProsusAI/finbert")
 
 # ==========================================
 # HELPERS
@@ -73,26 +83,17 @@ def parse_keywords(text):
 def extract_sentences(text, keywords):
     if pd.isnull(text):
         return ""
-
     sentences = re.split(r'(?<=[.!?])\s+', str(text))
-
-    matched = []
-    for s in sentences:
-        if any(k.lower() in s.lower() for k in keywords):
-            matched.append(s.strip())
-
-    return "\n".join(matched)
+    return "\n".join([s for s in sentences if any(k.lower() in s.lower() for k in keywords)])
 
 # ==========================================
 # BRAND HELPERS
 # ==========================================
 def get_brand_aliases(brand):
-
     if pd.isnull(brand):
         return []
 
     brand = str(brand).lower()
-
     aliases = set([brand])
 
     cleaned = re.sub(r'\b(berhad|bhd|sdn bhd|ltd|inc|corp)\b', '', brand).strip()
@@ -114,18 +115,14 @@ def get_brand_aliases(brand):
 
     return list(aliases)
 
-
 def extract_brand_sentence(text, aliases):
-
     if pd.isnull(text):
         return ""
-
     sentences = re.split(r'(?<=[.!?])\s+', str(text))
-
     return " ".join([s for s in sentences if any(a in s.lower() for a in aliases)])
 
 # ==========================================
-# KEYWORD ENGINE
+# PROCESS FUNCTIONS
 # ==========================================
 def keyword_match_v2(df, kw_file, kw_text, tag_col, sentence_col, create_sentence):
 
@@ -134,7 +131,6 @@ def keyword_match_v2(df, kw_file, kw_text, tag_col, sentence_col, create_sentenc
     if kw_file:
         kw_df = pd.read_excel(kw_file)
         keywords = kw_df.iloc[:, 0].dropna().astype(str).tolist()
-
     elif kw_text:
         keywords = parse_keywords(kw_text)
 
@@ -151,9 +147,6 @@ def keyword_match_v2(df, kw_file, kw_text, tag_col, sentence_col, create_sentenc
 
     return df
 
-# ==========================================
-# TRANSLATION
-# ==========================================
 def translate(df):
     translator = GoogleTranslator(source='auto', target='en')
 
@@ -164,12 +157,8 @@ def translate(df):
             return x
 
     df["Translated"] = df["Combined"].apply(tr)
-    df["Translated"] = df["Translated"].apply(clean_text)
     return df
 
-# ==========================================
-# CLUSTERING
-# ==========================================
 def cluster(df, threshold):
     model = load_model()
 
@@ -187,9 +176,6 @@ def cluster(df, threshold):
     df["Cluster"] = clustering.fit_predict(emb)
     return df
 
-# ==========================================
-# EXPORT
-# ==========================================
 def to_excel(df):
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -204,9 +190,7 @@ st.title("📊 Your Number 1 Data Cleaner!")
 
 file = st.file_uploader("Upload Excel File", type=["xlsx"])
 
-# =========================
-# LOAD FILE STATUS
-# =========================
+# LOAD FILE
 if file and not st.session_state.file_loaded:
     xls = pd.ExcelFile(file)
     sheet = st.selectbox("Select Sheet", xls.sheet_names)
@@ -219,20 +203,25 @@ df = st.session_state.data
 if df is None:
     st.stop()
 
-st.subheader(f"Step File Load: {status_icon('step_file')}")
+st.subheader(f"File Status: {status_icon('step_file')}")
 st.dataframe(df.head())
 
 # ==========================================
-# STEP 1 — COMBINED
+# STEP 1
 # ==========================================
 st.header("Step 1 — Combined Column")
 
-if st.button("Skip Step 1"):
-    set_status("step1", "🟡 Skipped")
-
 cols = st.multiselect("Select columns", df.columns)
 
-if st.button("▶ Run Combined"):
+c1, c2 = st.columns(2)
+run1 = c1.button("▶ Run", disabled=is_skipped(1))
+skip1 = c2.button("⏭ Skip")
+
+if skip1:
+    set_skip(1)
+    set_status("step1", "🟡 Skipped")
+
+if run1 and not is_skipped(1):
     try:
         set_status("step1", "🔵 Running")
         df = create_combined(df, cols)
@@ -241,19 +230,24 @@ if st.button("▶ Run Combined"):
     except:
         set_status("step1", "🔴 Error")
 
-st.write("Status:", status_icon("step1"))
+st.write(status_icon("step1"))
 
 # ==========================================
-# STEP 2 — DUPLICATES
+# STEP 2
 # ==========================================
 st.header("Step 2 — Remove Duplicates")
 
-if st.button("Skip Step 2"):
-    set_status("step2", "🟡 Skipped")
-
 exclude = st.multiselect("Exclude columns", df.columns)
 
-if st.button("▶ Run Duplicates"):
+c1, c2 = st.columns(2)
+run2 = c1.button("▶ Run", disabled=is_skipped(2))
+skip2 = c2.button("⏭ Skip")
+
+if skip2:
+    set_skip(2)
+    set_status("step2", "🟡 Skipped")
+
+if run2 and not is_skipped(2):
     try:
         set_status("step2", "🔵 Running")
         df = remove_duplicates(df, exclude)
@@ -262,84 +256,59 @@ if st.button("▶ Run Duplicates"):
     except:
         set_status("step2", "🔴 Error")
 
-st.write("Status:", status_icon("step2"))
+st.write(status_icon("step2"))
 
 # ==========================================
-# STEP 3 — KEYWORDS
+# STEP 3
 # ==========================================
 st.header("Step 3 — Keyword Matching")
 
-st.markdown("### Keyword Input")
-
-st.info("You can either upload a keyword file OR type keywords manually below.")
-
-num_groups = st.number_input("How many keyword groups?", 1, 10, 1)
+num_groups = st.number_input("Keyword groups", 1, 10, 1)
 
 for i in range(num_groups):
 
-    st.markdown(f"---")
-    st.subheader(f"🔹 Group {i+1}")
+    st.subheader(f"Group {i+1}")
 
-    kw_file = st.file_uploader(
-        f"Upload keyword file (Group {i+1})",
-        type=["xlsx"],
-        key=f"kw{i}"
-    )
+    kw_file = st.file_uploader("Keyword file", type=["xlsx"], key=f"kw{i}")
+    kw_text = st.text_input("Manual keywords", key=f"kwt{i}")
 
-    st.markdown("**OR type keywords manually (comma separated):**")
+    tag_col = st.text_input("Tag column", f"Tags_{i+1}")
+    sent_col = st.text_input("Sentence column", f"Sent_{i+1}")
+    create_sentence = st.checkbox("Create sentence", key=f"cs{i}")
 
-    kw_text = st.text_input(
-        f"Manual keywords (Group {i+1})",
-        placeholder="e.g. complaint, delay, service, refund",
-        key=f"kwt{i}"
-    )
+    c1, c2 = st.columns(2)
+    run3 = c1.button("▶ Run", key=f"run{i}", disabled=is_skipped(3))
+    skip3 = c2.button("⏭ Skip", key=f"skip{i}")
 
-    tag_col = st.text_input(
-        f"Tag column name (Group {i+1})",
-        value=f"Tags_{i+1}"
-    )
+    if skip3:
+        set_skip(3)
+        set_status("step3", "🟡 Skipped")
 
-    sent_col = st.text_input(
-        f"Sentence column name (Group {i+1})",
-        value=f"Sent_{i+1}"
-    )
-
-    create_sentence = st.checkbox(
-        "Create sentence column?",
-        key=f"cs{i}"
-    )
-
-    if st.button(f"▶ Run Group {i+1}"):
-
+    if run3 and not is_skipped(3):
         try:
             set_status("step3", "🔵 Running")
-
-            df = keyword_match_v2(
-                df,
-                kw_file,
-                kw_text,
-                tag_col,
-                sent_col,
-                create_sentence
-            )
-
+            df = keyword_match_v2(df, kw_file, kw_text, tag_col, sent_col, create_sentence)
             st.session_state.data = df
             set_status("step3", "🟢 Done")
-
-        except Exception as e:
+        except:
             set_status("step3", "🔴 Error")
-            st.error(str(e))
 
-st.write("Status:", status_icon("step3"))
+st.write(status_icon("step3"))
+
 # ==========================================
-# STEP 4 — TRANSLATION
+# STEP 4
 # ==========================================
 st.header("Step 4 — Translation")
 
-if st.button("Skip Step 4"):
+c1, c2 = st.columns(2)
+run4 = c1.button("▶ Run", disabled=is_skipped(4))
+skip4 = c2.button("⏭ Skip")
+
+if skip4:
+    set_skip(4)
     set_status("step4", "🟡 Skipped")
 
-if st.button("▶ Run Translation"):
+if run4 and not is_skipped(4):
     try:
         set_status("step4", "🔵 Running")
         df = translate(df)
@@ -348,23 +317,31 @@ if st.button("▶ Run Translation"):
     except:
         set_status("step4", "🔴 Error")
 
-st.write("Status:", status_icon("step4"))
+st.write(status_icon("step4"))
 
 # ==========================================
 # STEP 5 — SENTIMENT
 # ==========================================
-st.header("Step 5 — Sentiment Analysis")
+st.header("Step 5 — Sentiment")
 
-sent_source = st.radio("Use:", ["Combined", "Translated"])
+sent_source = st.radio("Source", ["Combined", "Translated"])
 brand_col = st.selectbox("Brand column", df.columns)
 
-if st.button("▶ Run Sentiment"):
+c1, c2 = st.columns(2)
+run5 = c1.button("▶ Run", disabled=is_skipped(5))
+skip5 = c2.button("⏭ Skip")
+
+if skip5:
+    set_skip(5)
+    set_status("step5", "🟡 Skipped")
+
+if run5 and not is_skipped(5):
     try:
         set_status("step5", "🔵 Running")
 
         model = load_sentiment_model()
 
-        sentiments, scores, sentences = [], [], []
+        sentiments, scores = [], []
 
         for _, row in df.iterrows():
 
@@ -374,21 +351,17 @@ if st.button("▶ Run Sentiment"):
             aliases = get_brand_aliases(brand)
             brand_text = extract_brand_sentence(text, aliases)
 
-            if brand_text == "":
+            if not brand_text:
                 sentiments.append("NO_MENTION")
                 scores.append(None)
-                sentences.append("")
                 continue
 
             result = model(brand_text[:512])[0]
-
             sentiments.append(result["label"])
             scores.append(result["score"])
-            sentences.append(brand_text)
 
         df["Sentiment"] = sentiments
         df["Score"] = scores
-        df["Sentence"] = sentences
 
         st.session_state.data = df
         set_status("step5", "🟢 Done")
@@ -396,16 +369,24 @@ if st.button("▶ Run Sentiment"):
     except:
         set_status("step5", "🔴 Error")
 
-st.write("Status:", status_icon("step5"))
+st.write(status_icon("step5"))
 
 # ==========================================
-# STEP 6 — CLUSTERING
+# STEP 6
 # ==========================================
 st.header("Step 6 — Clustering")
 
 threshold = st.slider("Strictness", 0.25, 0.35, 0.28)
 
-if st.button("▶ Run Clustering"):
+c1, c2 = st.columns(2)
+run6 = c1.button("▶ Run", disabled=is_skipped(6))
+skip6 = c2.button("⏭ Skip")
+
+if skip6:
+    set_skip(6)
+    set_status("step6", "🟡 Skipped")
+
+if run6 and not is_skipped(6):
     try:
         set_status("step6", "🔵 Running")
         df = cluster(df, threshold)
@@ -414,16 +395,17 @@ if st.button("▶ Run Clustering"):
     except:
         set_status("step6", "🔴 Error")
 
-st.write("Status:", status_icon("step6"))
+st.write(status_icon("step6"))
 
 # ==========================================
 # OUTPUT
 # ==========================================
 st.header("Final Output")
+
 st.dataframe(st.session_state.data)
 
 st.download_button(
-    "📥 Download",
+    "📥 Download Excel",
     data=to_excel(st.session_state.data),
     file_name="output.xlsx"
 )
