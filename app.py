@@ -20,7 +20,7 @@ st.set_page_config(
 )
 
 # ==========================================
-# KEEP HYPERLINKS (FIXED)
+# LOAD EXCEL WITH HYPERLINKS (FIXED)
 # ==========================================
 def load_excel_with_hyperlinks(file, sheet_name):
     wb = load_workbook(file, data_only=False)
@@ -29,42 +29,40 @@ def load_excel_with_hyperlinks(file, sheet_name):
     headers = [cell.value for cell in ws[1]]
 
     rows = []
+
     for row in ws.iter_rows(min_row=2):
         row_data = []
 
         for cell in row:
-            # FIXED: safer hyperlink handling
-            if cell.hyperlink and cell.hyperlink.target:
-                row_data.append(cell.hyperlink.target)
-            elif isinstance(cell.value, str) and cell.value.startswith("http"):
-                row_data.append(cell.value)
-            else:
-                row_data.append(cell.value)
+            text = cell.value
+            link = cell.hyperlink.target if cell.hyperlink else None
+
+            row_data.append(text)
 
         rows.append(row_data)
 
-    return pd.DataFrame(rows, columns=headers)
+    df = pd.DataFrame(rows, columns=headers)
+
+    # store hyperlink separately (IMPORTANT FIX)
+    if "Headline" in df.columns:
+        df["Headline_Link"] = None
+
+        col_idx = df.columns.get_loc("Headline")
+
+        for i, row in enumerate(ws.iter_rows(min_row=2)):
+            cell = row[col_idx]
+            if cell.hyperlink:
+                df.loc[i, "Headline_Link"] = cell.hyperlink.target
+
+    return df
+
 
 # ==========================================
-# SESSION STATE RESET (FIXED)
+# SESSION STATE
 # ==========================================
 if "data" not in st.session_state:
     st.session_state.data = None
 
-if "file_hash" not in st.session_state:
-    st.session_state.file_hash = None
-
-# RESET when new file uploaded
-def reset_state(file):
-    if file is not None:
-        current_hash = hash(file.getvalue())
-        if st.session_state.file_hash != current_hash:
-            st.session_state.data = None
-            st.session_state.file_hash = current_hash
-
-# ==========================================
-# STATUS SYSTEM
-# ==========================================
 if "status" not in st.session_state:
     st.session_state.status = {
         "step1": "Not Run",
@@ -90,6 +88,7 @@ def icon(status):
         "Skipped": "⚪"
     }.get(status, "🟡")
 
+
 # ==========================================
 # MODELS
 # ==========================================
@@ -100,6 +99,7 @@ def load_model():
 @st.cache_resource
 def load_sentiment():
     return pipeline("sentiment-analysis", model="ProsusAI/finbert")
+
 
 # ==========================================
 # HELPERS
@@ -129,25 +129,52 @@ def generate_cluster_summary(df):
     df["Cluster_Description"] = df["Cluster"].map(summary)
     return df
 
+
+# ==========================================
+# EXPORT (REMOVE LINK COLUMN BUT KEEP HYPERLINK)
+# ==========================================
 def to_excel(df):
+
+    export_df = df.copy()
+
     buffer = BytesIO()
+
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False)
+        export_df.to_excel(writer, index=False)
+
+        workbook = writer.book
+        sheet = writer.sheets["Sheet1"]
+
+        # restore hyperlinks into Excel
+        if "Headline_Link" in export_df.columns:
+
+            col_idx = list(export_df.columns).index("Headline") + 1
+
+            for row_idx, link in enumerate(export_df["Headline_Link"], start=2):
+                if pd.notna(link):
+                    cell = sheet.cell(row=row_idx, column=col_idx)
+                    cell.hyperlink = link
+                    cell.style = "Hyperlink"
+
+        # remove helper column
+        if "Headline_Link" in export_df.columns:
+            export_df.drop(columns=["Headline_Link"], inplace=True)
+
     buffer.seek(0)
     return buffer
 
+
 # ==========================================
-# UI HEADER
+# UI
 # ==========================================
 st.title("📊 Data Cleaner Pro")
 
 file = st.file_uploader("Upload Excel File", type=["xlsx"])
 
-reset_state(file)
-
 if file and st.session_state.data is None:
     xls = pd.ExcelFile(file)
     sheet = st.selectbox("Select Sheet", xls.sheet_names)
+
     st.session_state.data = load_excel_with_hyperlinks(file, sheet)
 
 df = st.session_state.data
@@ -158,133 +185,83 @@ if df is None:
 
 st.dataframe(df.head(), use_container_width=True)
 
+
 # ==========================================
 # STEP 1
 # ==========================================
-st.header("🧩 Step 1 — Combine Columns (Required)")
+st.header("🧩 Step 1 — Combine Columns")
+
 cols = st.multiselect("Select columns", df.columns)
 
-c1, c2 = st.columns(2)
-run1 = c1.button("▶ Run Step 1", key="run1")
-skip1 = c2.button("⏭ Skip Step 1", key="skip1")
+if st.button("▶ Run Step 1"):
 
-if run1:
-    if cols:
-        set_status("step1", "Running")
-        df = create_combined(df, cols)
-        st.session_state.data = df
-        set_status("step1", "Done")
-    else:
-        set_status("step1", "Error")
+    set_status("step1", "Running")
 
-if skip1:
-    set_status("step1", "Skipped")
+    df = create_combined(df, cols)
+
+    st.session_state.data = df
+
+    set_status("step1", "Done")
+
 
 if "Combined" not in df.columns:
-    st.warning("Step 1 required")
     st.stop()
 
-if get_status("step1") == "Done":
-    st.dataframe(df.head(), use_container_width=True)
 
 # ==========================================
 # STEP 2
 # ==========================================
 st.header("🧹 Step 2 — Remove Duplicates")
 
-c1, c2 = st.columns(2)
-run2 = c1.button("▶ Run Step 2", key="run2")
-skip2 = c2.button("⏭ Skip Step 2", key="skip2")
-
-if run2:
-    set_status("step2", "Running")
+if st.button("▶ Run Step 2"):
     df = remove_duplicates(df)
     st.session_state.data = df
     set_status("step2", "Done")
 
-if skip2:
-    set_status("step2", "Skipped")
-
-if get_status("step2") == "Done":
-    st.dataframe(df.head(), use_container_width=True)
 
 # ==========================================
 # STEP 3
 # ==========================================
 st.header("🔑 Step 3 — Keyword Matching")
 
-num = st.number_input("Groups", 1, 10, 1)
+kw_text = st.text_input("Keywords (comma separated)")
 
-for i in range(num):
+tag_col = st.text_input("Tag column", "Tags")
 
-    st.subheader(f"Group {i+1}")
+extract_sent = st.checkbox("Extract sentences?")
+sent_col = st.text_input("Sentence column", "Sent")
 
-    kw_file = st.file_uploader("Upload keyword file OR use manual", type=["xlsx"], key=f"file{i}")
-    kw_text = st.text_input("Manual keywords", key=f"text{i}")
+if st.button("▶ Run Step 3"):
 
-    tag_col = st.text_input("Tag column", f"Tags_{i+1}")
+    keywords = [k.strip() for k in kw_text.split(",") if k.strip()]
 
-    extract_sent = st.checkbox("Extract sentences?", key=f"sent{i}")
-    sent_col = st.text_input("Sentence column", f"Sent_{i+1}")
+    df[tag_col] = df["Combined"].apply(
+        lambda x: ", ".join([k for k in keywords if k.lower() in str(x).lower()])
+    )
 
-    c1, c2 = st.columns(2)
-    run3 = c1.button("▶ Run", key=f"run3_{i}")
-    skip3 = c2.button("⏭ Skip", key=f"skip3_{i}")
+    if extract_sent:
+        df[sent_col] = df["Combined"].apply(
+            lambda x: extract_sentences(x, keywords)
+        )
 
-    if run3:
-        set_status("step3", "Running")
+    st.session_state.data = df
 
-        if kw_file and kw_text:
-            st.error("Use only ONE input method")
-            set_status("step3", "Error")
-        else:
-            keywords = []
-
-            if kw_file:
-                kw_df = pd.read_excel(kw_file)
-                keywords = kw_df.iloc[:, 0].dropna().astype(str).tolist()
-            else:
-                keywords = [k.strip() for k in kw_text.split(",") if k.strip()]
-
-            df[tag_col] = df["Combined"].apply(
-                lambda x: ", ".join([k for k in keywords if k.lower() in str(x).lower()])
-            )
-
-            if extract_sent:
-                df[sent_col] = df["Combined"].apply(
-                    lambda x: extract_sentences(x, keywords)
-                )
-
-            st.session_state.data = df
-            set_status("step3", "Done")
-
-    if skip3:
-        set_status("step3", "Skipped")
-
-if get_status("step3") == "Done":
-    st.dataframe(df.head(), use_container_width=True)
 
 # ==========================================
 # STEP 4
 # ==========================================
 st.header("🌍 Step 4 — Translation")
 
-c1, c2 = st.columns(2)
-run4 = c1.button("▶ Run Step 4", key="run4")
-skip4 = c2.button("⏭ Skip Step 4", key="skip4")
+if st.button("▶ Run Step 4"):
 
-if run4:
-    set_status("step4", "Running")
     translator = GoogleTranslator(source="auto", target="en")
-    df["Translated"] = df["Combined"].apply(lambda x: translator.translate(str(x)[:2000]))
+
+    df["Translated"] = df["Combined"].apply(
+        lambda x: translator.translate(str(x)[:2000])
+    )
+
     st.session_state.data = df
-    set_status("step4", "Done")
 
-if skip4:
-    set_status("step4", "Skipped")
-
-if get_status("step4") == "Done":
-    st.dataframe(df.head(), use_container_width=True)
 
 # ==========================================
 # STEP 5
@@ -292,20 +269,18 @@ if get_status("step4") == "Done":
 st.header("💬 Step 5 — Sentiment")
 
 source = st.radio("Source", ["Combined", "Translated"] if "Translated" in df.columns else ["Combined"])
+
 brand_col = st.selectbox("Brand column", df.columns)
 
-c1, c2 = st.columns(2)
-run5 = c1.button("▶ Run Step 5", key="run5")
-skip5 = c2.button("⏭ Skip Step 5", key="skip5")
-
-if run5:
-    set_status("step5", "Running")
+if st.button("▶ Run Step 5"):
 
     model = load_sentiment()
+
     results = []
 
     for _, row in df.iterrows():
         text = str(row[source])
+
         if str(row[brand_col]).lower() not in text.lower():
             results.append("NO_MENTION")
         else:
@@ -313,13 +288,7 @@ if run5:
 
     df["Sentiment"] = results
     st.session_state.data = df
-    set_status("step5", "Done")
 
-if skip5:
-    set_status("step5", "Skipped")
-
-if get_status("step5") == "Done":
-    st.dataframe(df.head(), use_container_width=True)
 
 # ==========================================
 # STEP 6
@@ -328,14 +297,10 @@ st.header("📦 Step 6 — Clustering")
 
 threshold = st.slider("Strictness", 0.25, 0.35, 0.28)
 
-c1, c2 = st.columns(2)
-run6 = c1.button("▶ Run Step 6", key="run6")
-skip6 = c2.button("⏭ Skip Step 6", key="skip6")
-
-if run6:
-    set_status("step6", "Running")
+if st.button("▶ Run Step 6"):
 
     model = load_model()
+
     emb = normalize(model.encode(df["Combined"].astype(str).tolist(), convert_to_numpy=True))
 
     clustering = AgglomerativeClustering(
@@ -346,16 +311,11 @@ if run6:
     )
 
     df["Cluster"] = clustering.fit_predict(emb)
+
     df = generate_cluster_summary(df)
 
     st.session_state.data = df
-    set_status("step6", "Done")
 
-if skip6:
-    set_status("step6", "Skipped")
-
-if get_status("step6") == "Done":
-    st.dataframe(df.head(), use_container_width=True)
 
 # ==========================================
 # OUTPUT
