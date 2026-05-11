@@ -289,46 +289,50 @@ st.write("### 📦 Current Keyword Groups")
 st.json(st.session_state.keyword_groups)
 
 # ==========================================
-# RUN ALL GROUPS
+# RUN ALL GROUPS + SKIP BUTTON (FIXED UI)
 # ==========================================
-if st.button("▶ Run All Keyword Groups"):
 
-    set_status("step3", "Running")
+col1, col2 = st.columns(2)
 
-    for g in st.session_state.keyword_groups:
+with col1:
+    if st.button("▶ Run All Keyword Groups"):
 
-        def get_matches(text):
-            matched = []
-            for k in g["keywords"]:
-                if exact_keyword_match(text, k):
-                    matched.append(g["map"][k])
-            return ", ".join(matched)
+        set_status("step3", "Running")
 
-        df[g["output_col"]] = df["Combined"].apply(get_matches)
+        for g in st.session_state.keyword_groups:
 
-    # sentence extraction (optional global)
-    if extract_sent:
-        def extract_matching_sentences(text):
-            sentences = re.split(r'(?<=[.!?])\s+', str(text))
-            matched_sentences = []
+            def get_matches(text):
+                matched = []
+                for k in g["keywords"]:
+                    if exact_keyword_match(text, k):
+                        matched.append(g["map"][k])
+                return ", ".join(matched)
 
-            for s in sentences:
-                for g in st.session_state.keyword_groups:
-                    for k in g["keywords"]:
-                        if exact_keyword_match(s, k):
-                            matched_sentences.append(s)
-                            break
+            df[g["output_col"]] = df["Combined"].apply(get_matches)
 
-            return " ".join(matched_sentences)
+        # sentence extraction (optional global)
+        if extract_sent:
+            def extract_matching_sentences(text):
+                sentences = re.split(r'(?<=[.!?])\s+', str(text))
+                matched_sentences = []
 
-        df[sent_col] = df["Combined"].apply(extract_matching_sentences)
+                for s in sentences:
+                    for g in st.session_state.keyword_groups:
+                        for k in g["keywords"]:
+                            if exact_keyword_match(s, k):
+                                matched_sentences.append(s)
+                                break
 
-    st.session_state.data = df
-    set_status("step3", "Done")
+                return " ".join(matched_sentences)
 
-if col2.button("⏭ Skip Step 3"):
-    set_status("step3", "Skipped")
+            df[sent_col] = df["Combined"].apply(extract_matching_sentences)
 
+        st.session_state.data = df
+        set_status("step3", "Done")
+
+with col2:
+    if st.button("⏭ Skip Step 3"):
+        set_status("step3", "Skipped")
 st.write(f"Status: {icon(get_status('step3'))} {get_status('step3')}")
 show_preview("step3", df)
 
