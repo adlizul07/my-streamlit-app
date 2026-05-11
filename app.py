@@ -12,7 +12,7 @@ from sklearn.preprocessing import normalize
 # ==========================================
 # CONFIG
 # ==========================================
-st.set_page_config(page_title="Data Cleaning & NLP Pipeline", layout="wide")
+st.set_page_config(page_title="Number 1 Data Cleaner!", layout="wide")
 DetectorFactory.seed = 0
 
 # ==========================================
