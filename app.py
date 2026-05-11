@@ -39,7 +39,7 @@ def load_sentiment_model():
     return pipeline("sentiment-analysis", model="ProsusAI/finbert")
 
 # ==========================================
-# HELPERS
+# HELPERS (UNCHANGED LOGIC)
 # ==========================================
 def clean_text(text):
     if pd.isnull(text):
@@ -74,9 +74,6 @@ def generate_cluster_summary(df):
     df["Cluster_Description"] = df["Cluster"].map(cluster_map)
     return df
 
-# ==========================================
-# PIPELINE
-# ==========================================
 def translate(df):
     translator = GoogleTranslator(source='auto', target='en')
 
@@ -89,24 +86,6 @@ def translate(df):
     df["Translated"] = df["Combined"].apply(tr)
     return df
 
-def cluster(df, threshold):
-    model = load_model()
-
-    emb = model.encode(df["Combined"].astype(str).tolist(), convert_to_numpy=True)
-    emb = normalize(emb)
-
-    clustering = AgglomerativeClustering(
-        n_clusters=None,
-        metric="cosine",
-        linkage="average",
-        distance_threshold=threshold
-    )
-
-    df["Cluster"] = clustering.fit_predict(emb)
-    df = generate_cluster_summary(df)
-
-    return df
-
 def to_excel(df):
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -115,72 +94,100 @@ def to_excel(df):
     return buffer
 
 # ==========================================
-# UI
+# SIDEBAR (NOTION NAVIGATION)
 # ==========================================
-st.title("📊 Data Cleaner Pro")
+st.sidebar.title("📁 Navigation")
 
-file = st.file_uploader("Upload Excel File", type=["xlsx"])
+page = st.sidebar.radio(
+    "Go to",
+    [
+        "📊 Dashboard",
+        "🧩 Combine Columns",
+        "🧹 Remove Duplicates",
+        "🔑 Keyword Matching",
+        "🌍 Translation",
+        "💬 Sentiment Analysis",
+        "📦 Clustering"
+    ]
+)
 
+st.sidebar.markdown("---")
+file = st.sidebar.file_uploader("Upload Excel", type=["xlsx"])
+
+# ==========================================
 # LOAD DATA
+# ==========================================
 if file and not st.session_state.file_loaded:
     xls = pd.ExcelFile(file)
-    sheet = st.selectbox("Select Sheet", xls.sheet_names)
+    sheet = st.sidebar.selectbox("Select Sheet", xls.sheet_names)
     st.session_state.data = pd.read_excel(file, sheet_name=sheet)
     st.session_state.file_loaded = True
 
 df = st.session_state.data
 
+# ==========================================
+# SAFETY CHECK
+# ==========================================
 if df is None:
-    st.info("Upload a file to start")
+    st.title("📊 Data Cleaner Pro")
+    st.info("Upload a file from sidebar to begin")
     st.stop()
 
-st.subheader("Preview")
-st.dataframe(df.head(), use_container_width=True)
+# ==========================================
+# DASHBOARD
+# ==========================================
+if page == "📊 Dashboard":
+
+    st.title("📊 Dashboard")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Rows", len(df))
+    col2.metric("Columns", len(df.columns))
+    col3.metric("Status", "Ready")
+
+    st.markdown("---")
+    st.dataframe(df.head(20), use_container_width=True)
 
 # ==========================================
-# STEP 1 (REQUIRED)
+# STEP 1 — REQUIRED
 # ==========================================
-st.header("🧩 Step 1 — Combine Columns (REQUIRED)")
-st.warning("⚠️ Step 1 is required because all other steps depend on the Combined column.")
+elif page == "🧩 Combine Columns":
 
-cols = st.multiselect("Select columns", df.columns)
+    st.title("🧩 Combine Columns (Required)")
 
-if st.button("▶ Run Step 1"):
-    if len(cols) == 0:
-        st.error("Please select at least one column")
-    else:
+    st.warning("⚠️ This step is required for all NLP steps")
+
+    cols = st.multiselect("Select columns", df.columns)
+
+    if st.button("▶ Run Combine"):
+
         df = create_combined(df, cols)
         st.session_state.data = df
-        st.success("Step 1 Completed ✔")
 
-# STOP if no Combined
-if "Combined" not in df.columns:
-    st.stop()
+        st.success("Combined column created ✔")
 
 # ==========================================
-# STEP 2 (SKIPPABLE)
+# STEP 2
 # ==========================================
-st.header("🧹 Step 2 — Remove Duplicates")
+elif page == "🧹 Remove Duplicates":
 
-skip2 = st.checkbox("Skip Step 2")
-
-if not skip2:
+    st.title("🧹 Remove Duplicates")
 
     exclude = st.multiselect("Exclude columns", df.columns)
 
-    if st.button("▶ Run Step 2"):
+    if st.button("▶ Run Deduplication"):
+
         df = remove_duplicates(df, exclude)
         st.session_state.data = df
-        st.success("Step 2 Done ✔")
+
+        st.success("Duplicates removed ✔")
 
 # ==========================================
-# STEP 3 (SKIPPABLE)
+# STEP 3 — KEYWORDS
 # ==========================================
-st.header("🔑 Step 3 — Keyword Matching")
+elif page == "🔑 Keyword Matching":
 
-skip3 = st.checkbox("Skip Step 3")
-
-if not skip3:
+    st.title("🔑 Keyword Matching")
 
     num = st.number_input("Keyword groups", 1, 10, 1)
 
@@ -188,10 +195,10 @@ if not skip3:
 
         st.subheader(f"Group {i+1}")
 
-        kw_text = st.text_input("Keywords (comma separated)", key=f"k{i}")
+        kw_text = st.text_input("Keywords (comma separated)", key=f"kw{i}")
         tag_col = st.text_input("Tag column", f"Tags_{i+1}")
 
-        extract_sent = st.checkbox("Extract sentences?", key=f"s{i}")
+        extract_sent = st.checkbox("Extract sentences?", key=f"sent{i}")
 
         sent_col = st.text_input(
             "Sentence column",
@@ -213,38 +220,39 @@ if not skip3:
                 )
 
             st.session_state.data = df
-            st.success("Step 3 Done ✔")
+            st.success("Keyword processing done ✔")
 
 # ==========================================
-# STEP 4 (SKIPPABLE)
+# STEP 4
 # ==========================================
-st.header("🌍 Step 4 — Translation")
+elif page == "🌍 Translation":
 
-skip4 = st.checkbox("Skip Step 4")
-
-if not skip4:
+    st.title("🌍 Translation")
 
     if st.button("▶ Run Translation"):
+
         df = translate(df)
         st.session_state.data = df
-        st.success("Step 4 Done ✔")
+
+        st.success("Translation completed ✔")
 
 # ==========================================
-# STEP 5 (SKIPPABLE)
+# STEP 5 — SENTIMENT
 # ==========================================
-st.header("💬 Step 5 — Sentiment")
+elif page == "💬 Sentiment Analysis":
 
-skip5 = st.checkbox("Skip Step 5")
+    st.title("💬 Sentiment Analysis")
 
-if not skip5:
+    source = st.radio(
+        "Source",
+        ["Combined", "Translated"] if "Translated" in df.columns else ["Combined"]
+    )
 
-    source = st.radio("Source", ["Combined", "Translated"] if "Translated" in df.columns else ["Combined"])
     brand_col = st.selectbox("Brand column", df.columns)
 
     if st.button("▶ Run Sentiment"):
 
         model = load_sentiment_model()
-
         results = []
 
         for _, row in df.iterrows():
@@ -256,21 +264,19 @@ if not skip5:
                 results.append("NO_MENTION")
                 continue
 
-            res = model(text[:512])[0]
-            results.append(res["label"])
+            results.append(model(text[:512])[0]["label"])
 
         df["Sentiment"] = results
         st.session_state.data = df
-        st.success("Step 5 Done ✔")
+
+        st.success("Sentiment analysis completed ✔")
 
 # ==========================================
-# STEP 6 (SKIPPABLE)
+# STEP 6 — CLUSTERING
 # ==========================================
-st.header("📦 Step 6 — Clustering")
+elif page == "📦 Clustering":
 
-skip6 = st.checkbox("Skip Step 6")
-
-if not skip6:
+    st.title("📦 Clustering")
 
     threshold = st.slider("Strictness", 0.25, 0.35, 0.28)
 
@@ -289,21 +295,17 @@ if not skip6:
         )
 
         df["Cluster"] = clustering.fit_predict(emb)
-
         df = generate_cluster_summary(df)
 
         st.session_state.data = df
-        st.success("Step 6 Done ✔")
+
+        st.success("Clustering completed ✔")
 
 # ==========================================
-# OUTPUT
+# OUTPUT (ALWAYS VISIBLE IN SIDEBAR FLOW)
 # ==========================================
-st.markdown("---")
-st.subheader("📦 Final Output")
-
-st.dataframe(df, use_container_width=True)
-
-st.download_button(
+st.sidebar.markdown("---")
+st.sidebar.download_button(
     "📥 Download Excel",
     data=to_excel(df),
     file_name="output.xlsx"
