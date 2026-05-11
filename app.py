@@ -172,14 +172,17 @@ st.title("📊 Data Cleaner Pro")
 
 file = st.file_uploader("Upload Excel File", type=["xlsx"])
 
+df = None  # IMPORTANT SAFETY INIT
+
 if file and st.session_state.data is None:
     xls = pd.ExcelFile(file)
     sheet = st.selectbox("Select Sheet", xls.sheet_names)
+
     df = load_excel(file, sheet)
 
-st.session_state.data = df
-st.session_state.history = [df.copy()]
-st.session_state.history_index = 0
+    st.session_state.data = df
+    st.session_state.history = [df.copy()]
+    st.session_state.history_index = 0
 
 df = st.session_state.data
 
