@@ -269,32 +269,68 @@ st.write("Status:", status_icon("step2"))
 # ==========================================
 st.header("Step 3 — Keyword Matching")
 
-st.info("Or you can add the keyword manually below 👇")
+st.markdown("### Keyword Input")
+
+st.info("You can either upload a keyword file OR type keywords manually below.")
 
 num_groups = st.number_input("How many keyword groups?", 1, 10, 1)
 
 for i in range(num_groups):
 
-    kw_file = st.file_uploader(f"Keyword file {i+1}", type=["xlsx"], key=f"kw{i}")
-    kw_text = st.text_input(f"OR manual keywords (comma separated)", key=f"kwt{i}")
+    st.markdown(f"---")
+    st.subheader(f"🔹 Group {i+1}")
 
-    tag_col = st.text_input(f"Tag column {i+1}", f"Tags_{i+1}")
-    sent_col = st.text_input(f"Sentence column {i+1}", f"Sent_{i+1}")
+    kw_file = st.file_uploader(
+        f"Upload keyword file (Group {i+1})",
+        type=["xlsx"],
+        key=f"kw{i}"
+    )
 
-    create_sentence = st.checkbox("Create sentence?", key=f"cs{i}")
+    st.markdown("**OR type keywords manually (comma separated):**")
 
-    if st.button(f"Run Group {i+1}"):
+    kw_text = st.text_input(
+        f"Manual keywords (Group {i+1})",
+        placeholder="e.g. complaint, delay, service, refund",
+        key=f"kwt{i}"
+    )
+
+    tag_col = st.text_input(
+        f"Tag column name (Group {i+1})",
+        value=f"Tags_{i+1}"
+    )
+
+    sent_col = st.text_input(
+        f"Sentence column name (Group {i+1})",
+        value=f"Sent_{i+1}"
+    )
+
+    create_sentence = st.checkbox(
+        "Create sentence column?",
+        key=f"cs{i}"
+    )
+
+    if st.button(f"▶ Run Group {i+1}"):
 
         try:
             set_status("step3", "🔵 Running")
-            df = keyword_match_v2(df, kw_file, kw_text, tag_col, sent_col, create_sentence)
+
+            df = keyword_match_v2(
+                df,
+                kw_file,
+                kw_text,
+                tag_col,
+                sent_col,
+                create_sentence
+            )
+
             st.session_state.data = df
             set_status("step3", "🟢 Done")
-        except:
+
+        except Exception as e:
             set_status("step3", "🔴 Error")
+            st.error(str(e))
 
 st.write("Status:", status_icon("step3"))
-
 # ==========================================
 # STEP 4 — TRANSLATION
 # ==========================================
