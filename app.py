@@ -369,25 +369,29 @@ def to_excel(df):
         workbook = writer.book
         sheet = writer.sheets["Sheet1"]
 
-        # ======================================
-        # RESTORE HYPERLINKS (HEADLINE ONLY)
-        # ======================================
-        if "Headline" in df.columns:
+# ======================================
+# RESTORE HYPERLINKS (HEADLINE ONLY)
+# ======================================
+if "Headline" in df.columns:
 
-   	 col_idx = list(df.columns).index("Headline") + 1
+    col_idx = list(df.columns).index("Headline") + 1
 
-   	 for row_idx, row in enumerate(df.itertuples(index=False), start=2):
+    for row_idx, row in enumerate(df.itertuples(index=False), start=2):
 
-     	   cell = sheet.cell(row=row_idx, column=col_idx)
+        cell = sheet.cell(row=row_idx, column=col_idx)
 
-      	  if "Headline_Link" in df.columns:
+        if "Headline_Link" in df.columns:
             link = df.iloc[row_idx - 2]["Headline_Link"]
-      	  else:
+        else:
             link = getattr(row, "Headline", None)
 
-     	   if pd.notna(link) and isinstance(link, str) and link.startswith(("http://", "https://")):
-       	     cell.hyperlink = link
-       	     cell.style = "Hyperlink"
+        if (
+            pd.notna(link)
+            and isinstance(link, str)
+            and link.startswith(("http://", "https://"))
+        ):
+            cell.hyperlink = link
+            cell.style = "Hyperlink"
 
     buffer.seek(0)
     return buffer
