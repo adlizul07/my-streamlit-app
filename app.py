@@ -18,18 +18,6 @@ st.set_page_config(
     page_icon="📊"
 )
 
-# Notion-style UI
-st.markdown("""
-<style>
-.block-container {padding: 2rem 2rem 3rem 2rem;}
-h1, h2, h3 {font-weight: 600;}
-.stButton > button {
-    border-radius: 10px;
-    padding: 0.4rem 1rem;
-}
-</style>
-""", unsafe_allow_html=True)
-
 # ==========================================
 # SESSION STATE
 # ==========================================
@@ -128,26 +116,23 @@ if df is None:
 st.dataframe(df.head(), use_container_width=True)
 
 # ==========================================
-# STEP 1 — COMBINE (REQUIRED)
+# STEP 1
 # ==========================================
 st.header("🧩 Step 1 — Combine Columns (Required)")
-st.caption(f"{icon(get_status('step1'))} {get_status('step1')}")
-
 cols = st.multiselect("Select columns", df.columns)
 
 c1, c2 = st.columns(2)
-run1 = c1.button("▶ Run")
-skip1 = c2.button("⏭ Skip")
+run1 = c1.button("▶ Run Step 1", key="run1")
+skip1 = c2.button("⏭ Skip Step 1", key="skip1")
 
 if run1:
-    if len(cols) == 0:
-        set_status("step1", "Error")
-        st.error("Select at least 1 column")
-    else:
+    if cols:
         set_status("step1", "Running")
         df = create_combined(df, cols)
         st.session_state.data = df
         set_status("step1", "Done")
+    else:
+        set_status("step1", "Error")
 
 if skip1:
     set_status("step1", "Skipped")
@@ -155,20 +140,18 @@ if skip1:
 if get_status("step1") == "Done":
     st.dataframe(df.head(), use_container_width=True)
 
-# MUST STOP IF NO COMBINED
 if "Combined" not in df.columns:
-    st.warning("Run Step 1 first")
+    st.warning("Step 1 required")
     st.stop()
 
 # ==========================================
-# STEP 2 — DEDUP
+# STEP 2
 # ==========================================
 st.header("🧹 Step 2 — Remove Duplicates")
-st.caption(f"{icon(get_status('step2'))} {get_status('step2')}")
 
 c1, c2 = st.columns(2)
-run2 = c1.button("▶ Run Dedup")
-skip2 = c2.button("⏭ Skip")
+run2 = c1.button("▶ Run Step 2", key="run2")
+skip2 = c2.button("⏭ Skip Step 2", key="skip2")
 
 if run2:
     set_status("step2", "Running")
@@ -183,10 +166,9 @@ if get_status("step2") == "Done":
     st.dataframe(df.head(), use_container_width=True)
 
 # ==========================================
-# STEP 3 — KEYWORDS (FIXED FILE OR MANUAL ONLY)
+# STEP 3
 # ==========================================
 st.header("🔑 Step 3 — Keyword Matching")
-st.caption(f"{icon(get_status('step3'))} {get_status('step3')}")
 
 num = st.number_input("Groups", 1, 10, 1)
 
@@ -194,33 +176,32 @@ for i in range(num):
 
     st.subheader(f"Group {i+1}")
 
-    kw_file = st.file_uploader("Upload keyword file (ONLY ONE METHOD)", type=["xlsx"], key=f"f{i}")
-    kw_text = st.text_input("OR manual keywords (comma separated)", key=f"t{i}")
+    kw_file = st.file_uploader("Upload keyword file OR use manual", type=["xlsx"], key=f"file{i}")
+    kw_text = st.text_input("Manual keywords", key=f"text{i}")
 
     tag_col = st.text_input("Tag column", f"Tags_{i+1}")
 
-    extract_sent = st.checkbox("Extract sentences?", key=f"s{i}")
+    extract_sent = st.checkbox("Extract sentences?", key=f"sent{i}")
     sent_col = st.text_input("Sentence column", f"Sent_{i+1}")
 
     c1, c2 = st.columns(2)
-    run3 = c1.button("▶ Run", key=f"r{i}")
-    skip3 = c2.button("⏭ Skip", key=f"sk{i}")
+    run3 = c1.button("▶ Run", key=f"run3_{i}")
+    skip3 = c2.button("⏭ Skip", key=f"skip3_{i}")
 
     if run3:
 
         set_status("step3", "Running")
 
         if kw_file and kw_text:
-            st.error("Use ONLY file OR manual keywords (not both)")
+            st.error("Use only ONE input method")
             set_status("step3", "Error")
         else:
-
             keywords = []
 
             if kw_file:
-                df_kw = pd.read_excel(kw_file)
-                keywords = df_kw.iloc[:, 0].dropna().astype(str).tolist()
-            elif kw_text:
+                kw_df = pd.read_excel(kw_file)
+                keywords = kw_df.iloc[:, 0].dropna().astype(str).tolist()
+            else:
                 keywords = [k.strip() for k in kw_text.split(",") if k.strip()]
 
             df[tag_col] = df["Combined"].apply(
@@ -242,14 +223,13 @@ if get_status("step3") == "Done":
     st.dataframe(df.head(), use_container_width=True)
 
 # ==========================================
-# STEP 4 — TRANSLATION
+# STEP 4
 # ==========================================
 st.header("🌍 Step 4 — Translation")
-st.caption(f"{icon(get_status('step4'))} {get_status('step4')}")
 
 c1, c2 = st.columns(2)
-run4 = c1.button("▶ Run Translation")
-skip4 = c2.button("⏭ Skip")
+run4 = c1.button("▶ Run Step 4", key="run4")
+skip4 = c2.button("⏭ Skip Step 4", key="skip4")
 
 if run4:
     set_status("step4", "Running")
@@ -265,17 +245,16 @@ if get_status("step4") == "Done":
     st.dataframe(df.head(), use_container_width=True)
 
 # ==========================================
-# STEP 5 — SENTIMENT
+# STEP 5
 # ==========================================
 st.header("💬 Step 5 — Sentiment")
-st.caption(f"{icon(get_status('step5'))} {get_status('step5')}")
 
 source = st.radio("Source", ["Combined", "Translated"] if "Translated" in df.columns else ["Combined"])
 brand_col = st.selectbox("Brand column", df.columns)
 
 c1, c2 = st.columns(2)
-run5 = c1.button("▶ Run Sentiment")
-skip5 = c2.button("⏭ Skip")
+run5 = c1.button("▶ Run Step 5", key="run5")
+skip5 = c2.button("⏭ Skip Step 5", key="skip5")
 
 if run5:
     set_status("step5", "Running")
@@ -301,16 +280,15 @@ if get_status("step5") == "Done":
     st.dataframe(df.head(), use_container_width=True)
 
 # ==========================================
-# STEP 6 — CLUSTERING
+# STEP 6
 # ==========================================
 st.header("📦 Step 6 — Clustering")
-st.caption(f"{icon(get_status('step6'))} {get_status('step6')}")
 
 threshold = st.slider("Strictness", 0.25, 0.35, 0.28)
 
 c1, c2 = st.columns(2)
-run6 = c1.button("▶ Run Clustering")
-skip6 = c2.button("⏭ Skip")
+run6 = c1.button("▶ Run Step 6", key="run6")
+skip6 = c2.button("⏭ Skip Step 6", key="skip6")
 
 if run6:
     set_status("step6", "Running")
@@ -342,7 +320,7 @@ if get_status("step6") == "Done":
 # ==========================================
 st.markdown("---")
 
-filename = st.text_input("Output file name", "output.xlsx")
+filename = st.text_input("Output filename", "output.xlsx")
 
 st.download_button(
     "📥 Download Excel",
