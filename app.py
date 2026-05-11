@@ -12,33 +12,32 @@ from transformers import pipeline
 # CONFIG
 # ==========================================
 st.set_page_config(
-    page_title="Data Cleaner Pro",
+    page_title="Notion Data Pipeline",
     layout="wide",
     page_icon="📊"
 )
 
 # ==========================================
-# STATE ENGINE (NEW)
+# STATE ENGINE
 # ==========================================
 if "data" not in st.session_state:
     st.session_state.data = None
 
-if "file_loaded" not in st.session_state:
-    st.session_state.file_loaded = False
+if "steps" not in st.session_state:
+    st.session_state.steps = {
+        "1": False,
+        "2": False,
+        "3": False,
+        "4": False,
+        "5": False,
+        "6": False
+    }
 
-if "completed" not in st.session_state:
-    st.session_state.completed = set()
+def done(step):
+    return st.session_state.steps[step]
 
-def mark_done(step):
-    st.session_state.completed.add(step)
-
-def is_done(step):
-    return step in st.session_state.completed
-
-def can_run(step, required=None):
-    if required is None:
-        return True
-    return all(r in st.session_state.completed for r in required)
+def mark(step):
+    st.session_state.steps[step] = True
 
 # ==========================================
 # MODELS
@@ -48,24 +47,18 @@ def load_model():
     return SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
 
 @st.cache_resource
-def load_sentiment_model():
+def load_sentiment():
     return pipeline("sentiment-analysis", model="ProsusAI/finbert")
 
 # ==========================================
 # HELPERS
 # ==========================================
-def clean_text(text):
-    if pd.isnull(text):
-        return text
-    return str(text).replace('_x000D_', ' ').replace('\n', ' ').strip()
-
 def preview(df, title):
     st.markdown(f"### 👀 {title}")
     st.dataframe(df.head(10), use_container_width=True)
 
 def create_combined(df, cols):
     df["Combined"] = df[cols].fillna("").astype(str).agg(" ".join, axis=1)
-    df["Combined"] = df["Combined"].apply(clean_text)
     return df
 
 def remove_duplicates(df, exclude):
@@ -77,16 +70,12 @@ def extract_sentences(text, keywords):
     return " ".join([s for s in sentences if any(k.lower() in s.lower() for k in keywords)])
 
 def translate(df):
-    translator = GoogleTranslator(source='auto', target='en')
-
-    df["Translated"] = df["Combined"].apply(
-        lambda x: translator.translate(str(x)[:2000])
-    )
+    tr = GoogleTranslator(source='auto', target='en')
+    df["Translated"] = df["Combined"].apply(lambda x: tr.translate(str(x)[:2000]))
     return df
 
 def cluster(df, threshold):
     model = load_model()
-
     emb = model.encode(df["Combined"].astype(str).tolist(), convert_to_numpy=True)
     emb = normalize(emb)
 
@@ -108,166 +97,186 @@ def to_excel(df):
     return buffer
 
 # ==========================================
+# SIDEBAR (NOTION STYLE NAV)
+# ==========================================
+st.sidebar.title("📊 Pipeline")
+
+page = st.sidebar.radio(
+    "Navigate",
+    [
+        "📊 Overview",
+        "🧩 Step 1 - Combine",
+        "🧹 Step 2 - Dedup",
+        "🔑 Step 3 - Keywords",
+        "🌍 Step 4 - Translate",
+        "💬 Step 5 - Sentiment",
+        "📦 Step 6 - Cluster",
+        "📥 Output"
+    ]
+)
+
+file = st.sidebar.file_uploader("Upload Excel", type=["xlsx"])
+
+# ==========================================
 # LOAD DATA
 # ==========================================
-st.title("📊 Data Cleaner Pro")
-
-file = st.file_uploader("Upload Excel File", type=["xlsx"])
-
-if file and not st.session_state.file_loaded:
+if file and st.session_state.data is None:
     xls = pd.ExcelFile(file)
-    sheet = st.selectbox("Select Sheet", xls.sheet_names)
-
+    sheet = st.sidebar.selectbox("Sheet", xls.sheet_names)
     st.session_state.data = pd.read_excel(file, sheet_name=sheet)
-    st.session_state.file_loaded = True
 
 df = st.session_state.data
 
 if df is None:
+    st.title("📊 Notion Data Pipeline")
+    st.info("Upload file to begin")
     st.stop()
 
 # ==========================================
-# STEP 1 — REQUIRED
+# OVERVIEW PAGE
 # ==========================================
-st.header("🧩 Step 1 — Combine Columns (Required)")
+if page == "📊 Overview":
 
-cols = st.multiselect("Select columns", df.columns)
+    st.title("📊 Pipeline Overview")
 
-if st.button("▶ Run Step 1"):
+    st.write("### Progress")
 
-    if len(cols) == 0:
-        st.error("Select at least one column")
-    else:
+    for k, v in st.session_state.steps.items():
+        st.write(f"Step {k}: {'🟢 Done' if v else '🟡 Pending'}")
+
+    preview(df, "Raw Data")
+
+# ==========================================
+# STEP 1
+# ==========================================
+if page == "🧩 Step 1 - Combine":
+
+    st.title("Step 1 — Combine Columns")
+
+    cols = st.multiselect("Select columns", df.columns)
+
+    if st.button("Run Step 1"):
+
         df = create_combined(df, cols)
         st.session_state.data = df
-        mark_done("step1")
-        st.success("Step 1 Done ✔")
+        mark("1")
 
-# ONLY preview AFTER run
-if is_done("step1"):
-    preview(df, "After Step 1")
-
-# BLOCK next steps if not done
-if not is_done("step1"):
-    st.warning("⚠ Please complete Step 1 first")
-    st.stop()
+    preview(df, "After Step 1" if done("1") else "Not Run")
 
 # ==========================================
-# STEP 2 — DEDUP
+# STEP 2
 # ==========================================
-st.header("🧹 Step 2 — Remove Duplicates")
+if page == "🧹 Step 2 - Dedup":
 
-exclude = st.multiselect("Exclude columns", df.columns)
+    st.title("Step 2 — Remove Duplicates")
 
-if st.button("▶ Run Step 2"):
+    if not done("1"):
+        st.warning("Complete Step 1 first")
+        st.stop()
 
-    df = remove_duplicates(df, exclude)
-    st.session_state.data = df
-    mark_done("step2")
-    st.success("Step 2 Done ✔")
+    exclude = st.multiselect("Exclude columns", df.columns)
 
-if is_done("step2"):
-    preview(df, "After Step 2")
+    if st.button("Run Step 2"):
+        df = remove_duplicates(df, exclude)
+        st.session_state.data = df
+        mark("2")
+
+    preview(df, "After Step 2" if done("2") else "Not Run")
 
 # ==========================================
-# STEP 3 — KEYWORDS
+# STEP 3
 # ==========================================
-st.header("🔑 Step 3 — Keyword Matching")
+if page == "🔑 Step 3 - Keywords":
 
-num = st.number_input("Groups", 1, 10, 1)
+    st.title("Step 3 — Keyword Matching")
 
-if st.button("▶ Run Step 3"):
+    if not done("1"):
+        st.warning("Complete Step 1 first")
+        st.stop()
 
-    for i in range(num):
+    kw = st.text_input("Keywords (comma separated)")
+    tag_col = st.text_input("Tag column", "Tags")
 
-        kw_text = st.text_input("Keywords", key=f"k{i}")
-        tag_col = st.text_input("Tag column", f"Tags_{i+1}")
+    if st.button("Run Step 3"):
 
-        keywords = [k.strip() for k in kw_text.split(",") if k.strip()]
+        keywords = [k.strip() for k in kw.split(",") if k.strip()]
 
         df[tag_col] = df["Combined"].apply(
             lambda x: ", ".join([k for k in keywords if k.lower() in str(x).lower()])
         )
 
-    st.session_state.data = df
-    mark_done("step3")
-    st.success("Step 3 Done ✔")
+        st.session_state.data = df
+        mark("3")
 
-if is_done("step3"):
-    preview(df, "After Step 3")
+    preview(df, "After Step 3" if done("3") else "Not Run")
 
 # ==========================================
-# STEP 4 — TRANSLATION
+# STEP 4
 # ==========================================
-st.header("🌍 Step 4 — Translation")
+if page == "🌍 Step 4 - Translate":
 
-if st.button("▶ Run Step 4"):
+    st.title("Step 4 — Translation")
 
-    df = translate(df)
-    st.session_state.data = df
-    mark_done("step4")
-    st.success("Step 4 Done ✔")
+    if st.button("Run Step 4"):
 
-if is_done("step4"):
-    preview(df, "After Step 4")
+        df = translate(df)
+        st.session_state.data = df
+        mark("4")
 
-# ==========================================
-# STEP 5 — SENTIMENT
-# ==========================================
-st.header("💬 Step 5 — Sentiment")
-
-source = st.radio("Source", ["Combined", "Translated"] if "Translated" in df.columns else ["Combined"])
-
-if st.button("▶ Run Step 5"):
-
-    model = load_sentiment_model()
-
-    results = []
-
-    for _, row in df.iterrows():
-
-        text = str(row[source])
-
-        if "Combined" in df.columns:
-            results.append(model(text[:512])[0]["label"])
-        else:
-            results.append("NO_MENTION")
-
-    df["Sentiment"] = results
-    st.session_state.data = df
-    mark_done("step5")
-    st.success("Step 5 Done ✔")
-
-if is_done("step5"):
-    preview(df, "After Step 5")
+    preview(df, "After Step 4" if done("4") else "Not Run")
 
 # ==========================================
-# STEP 6 — CLUSTERING
+# STEP 5
 # ==========================================
-st.header("📦 Step 6 — Clustering")
+if page == "💬 Step 5 - Sentiment":
 
-threshold = st.slider("Strictness", 0.25, 0.35, 0.28)
+    st.title("Step 5 — Sentiment")
 
-if st.button("▶ Run Step 6"):
+    source = st.radio("Source", ["Combined", "Translated"] if "Translated" in df.columns else ["Combined"])
 
-    df = cluster(df, threshold)
-    st.session_state.data = df
-    mark_done("step6")
-    st.success("Step 6 Done ✔")
+    if st.button("Run Step 5"):
 
-if is_done("step6"):
-    preview(df, "After Step 6")
+        model = load_sentiment()
+
+        df["Sentiment"] = df[source].apply(
+            lambda x: model(str(x)[:512])[0]["label"]
+        )
+
+        st.session_state.data = df
+        mark("5")
+
+    preview(df, "After Step 5" if done("5") else "Not Run")
 
 # ==========================================
-# FINAL OUTPUT
+# STEP 6
 # ==========================================
-st.markdown("---")
-st.subheader("📦 Final Output")
+if page == "📦 Step 6 - Cluster":
 
-preview(df, "Final Data")
+    st.title("Step 6 — Clustering")
 
-st.download_button(
-    "📥 Download Excel",
-    data=to_excel(df),
-    file_name="output.xlsx"
-)
+    threshold = st.slider("Strictness", 0.25, 0.35, 0.28)
+
+    if st.button("Run Step 6"):
+
+        df = cluster(df, threshold)
+        st.session_state.data = df
+        mark("6")
+
+    preview(df, "After Step 6" if done("6") else "Not Run")
+
+# ==========================================
+# OUTPUT
+# ==========================================
+if page == "📥 Output":
+
+    st.title("Final Output")
+
+    st.dataframe(df, use_container_width=True)
+
+    name = st.text_input("File name", "output.xlsx")
+
+    st.download_button(
+        "Download Excel",
+        data=to_excel(df),
+        file_name=name
+    )
