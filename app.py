@@ -482,7 +482,7 @@ st.markdown("""
 <div class="app-header">
     <div class="app-header-icon">📊</div>
     <div>
-        <div class="app-header-title">DATA CLEANER PRO</div>
+        <div class="app-header-title">INSIGHTS BIBIK PRO</div>
         <div class="app-header-sub">Media intelligence pipeline · NLP + Clustering + Sentiment</div>
     </div>
     <div class="app-header-badge">v2.0</div>
