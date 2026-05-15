@@ -441,20 +441,50 @@ def exact_keyword_match(text, keyword):
 def load_excel(file, sheet):
     wb = load_workbook(file, data_only=False)
     ws = wb[sheet]
+
     headers = [cell.value for cell in ws[1]]
+
+    # ==========================================
+    # HEADER VALIDATION
+    # ==========================================
+    cleaned_headers = []
+
+    for h in headers:
+        if h is None or str(h).strip() == "":
+            st.error("❌ Wrong header detected. Please check your data.")
+            st.stop()
+
+        cleaned_headers.append(str(h).strip())
+
+    # Check duplicate headers
+    if len(cleaned_headers) != len(set(cleaned_headers)):
+        st.error("❌ Wrong header detected. Please check your data.")
+        st.stop()
+
+    # ==========================================
+    # LOAD DATA
+    # ==========================================
     rows = []
+
     for row in ws.iter_rows(min_row=2):
         rows.append([cell.value for cell in row])
-    df = pd.DataFrame(rows, columns=headers)
+
+    df = pd.DataFrame(rows, columns=cleaned_headers)
+
+    # ==========================================
+    # PRESERVE HYPERLINKS
+    # ==========================================
     if "Headline" in df.columns:
         df["Headline_Link"] = None
         headline_col_idx = list(df.columns).index("Headline")
+
         for i, row in enumerate(ws.iter_rows(min_row=2)):
             cell = row[headline_col_idx]
+
             if cell.hyperlink:
                 df.loc[i, "Headline_Link"] = cell.hyperlink.target
-    return df
 
+    return df
 def to_excel(df):
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
