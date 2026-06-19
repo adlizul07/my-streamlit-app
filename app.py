@@ -7,7 +7,6 @@ from deep_translator import GoogleTranslator
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.preprocessing import normalize
-from transformers import pipeline
 from openpyxl import load_workbook
 
 # ==========================================
@@ -112,20 +111,19 @@ html, body, [data-testid="stAppViewContainer"] {
     letter-spacing: 0.5px;
 }
 
-/* ---- STEP CARD ---- */
+/* ---- STEP SECTION (simple line separator instead of a boxed card) ---- */
 .step-card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: 28px 32px;
-    margin-bottom: 20px;
+    background: transparent;
+    border: none;
+    border-top: 1px solid var(--border);
+    padding: 28px 0 8px;
+    margin-bottom: 4px;
     position: relative;
     transition: border-color 0.2s;
 }
-.step-card:hover { border-color: #2e3440; }
-.step-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--border-glow), 0 4px 32px #2e7dff12; }
-.step-card.done  { border-color: #00d48f33; }
-.step-card.error { border-color: #ff475733; }
+.step-card.active { border-top: 2px solid var(--accent); }
+.step-card.done  { border-top: 2px solid var(--accent-green); }
+.step-card.error { border-top: 2px solid var(--accent-red); }
 
 .step-header {
     display: flex;
@@ -334,7 +332,7 @@ hr { border-color: var(--border) !important; }
     margin-bottom: 24px;
 }
 
-/* ---- PROGRESS BAR ---- */
+/* ---- PROGRESS BAR (pipeline strip) ---- */
 .pipeline-progress {
     display: flex;
     align-items: center;
@@ -353,6 +351,11 @@ hr { border-color: var(--border) !important; }
 .pipeline-step.skipped { background: var(--accent-grey); }
 .pipeline-step.error   { background: var(--accent-red); }
 
+/* ---- LOADING PROGRESS BAR (Step 5 clustering) — force green fill ---- */
+[data-testid="stProgress"] > div > div > div > div {
+    background-color: var(--accent-green) !important;
+}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -365,7 +368,7 @@ if "data" not in st.session_state:
 if "status" not in st.session_state:
     st.session_state.status = {
         "step1": "Not Run", "step2": "Not Run", "step3": "Not Run",
-        "step4": "Not Run", "step5": "Not Run", "step6": "Not Run",
+        "step4": "Not Run", "step5": "Not Run",
     }
 
 def set_status(step, value):
@@ -401,10 +404,6 @@ def show_preview(step, df):
 @st.cache_resource
 def load_model():
     return SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
-
-@st.cache_resource
-def load_sentiment():
-    return pipeline("sentiment-analysis", model="ProsusAI/finbert")
 
 # ==========================================
 # HELPERS
@@ -513,16 +512,16 @@ st.markdown("""
     <div class="app-header-icon">📊</div>
     <div>
         <div class="app-header-title">INSIGHTS BIBIK PRO</div>
-        <div class="app-header-sub">Media intelligence pipeline · NLP + Clustering + Sentiment</div>
+        <div class="app-header-sub">Media intelligence pipeline · NLP + Clustering</div>
     </div>
-    <div class="app-header-badge">v2.0</div>
+    <div class="app-header-badge">v2.1</div>
 </div>
 """, unsafe_allow_html=True)
 
 # ==========================================
 # PIPELINE PROGRESS BAR
 # ==========================================
-steps = ["step1", "step2", "step3", "step4", "step5", "step6"]
+steps = ["step1", "step2", "step3", "step4", "step5"]
 step_divs = ""
 for s in steps:
     status = get_status(s)
@@ -532,7 +531,7 @@ for s in steps:
 st.markdown(f"""
 <div class="pipeline-progress">{step_divs}</div>
 <p style="font-family:'Space Mono',monospace;font-size:11px;color:#4a5162;margin-bottom:28px;letter-spacing:1px;">
-  PIPELINE · 6 STEPS
+  PIPELINE · 5 STEPS
 </p>
 """, unsafe_allow_html=True)
 
@@ -744,59 +743,36 @@ show_preview("step4", df)
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
-# STEP 5 — SENTIMENT
+# STEP 5 — CLUSTERING
 # ==========================================
 card_cls = step_card_class("step5")
 st.markdown(f'<div class="step-card {card_cls}">', unsafe_allow_html=True)
-st.markdown('<div class="step-header"><span class="step-number">STEP 05</span><span class="step-title">Sentiment Analysis</span></div>', unsafe_allow_html=True)
-st.markdown('<p style="color:#8b92a5;font-size:13px;margin-bottom:16px;">Powered by FinBERT — optimised for financial & business text.</p>', unsafe_allow_html=True)
-
-source_options = ["Combined", "Translated"] if "Translated" in df.columns else ["Combined"]
-col_a, col_b = st.columns(2)
-with col_a:
-    source = st.radio("Analyse from", source_options, horizontal=True)
-with col_b:
-    brand_col = st.selectbox("Brand / entity column", df.columns)
-
-col1, col2 = st.columns([1, 1])
-with col1:
-    if st.button("▶ Run Step 5", key="run5"):
-        set_status("step5", "Running")
-        model = load_sentiment()
-        results = []
-        for _, row in df.iterrows():
-            text = str(row[source]) if pd.notna(row[source]) else ""
-            if str(row[brand_col]).lower() not in text.lower():
-                results.append("NO_MENTION")
-            else:
-                results.append(model(text[:512])[0]["label"])
-        df["Sentiment"] = results
-        st.session_state.data = df
-        set_status("step5", "Done")
-with col2:
-    if st.button("⏭ Skip", key="skip5"):
-        set_status("step5", "Skipped")
-
-st.markdown(status_pill("step5"), unsafe_allow_html=True)
-show_preview("step5", df)
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ==========================================
-# STEP 6 — CLUSTERING
-# ==========================================
-card_cls = step_card_class("step6")
-st.markdown(f'<div class="step-card {card_cls}">', unsafe_allow_html=True)
-st.markdown('<div class="step-header"><span class="step-number">STEP 06</span><span class="step-title">Semantic Clustering</span></div>', unsafe_allow_html=True)
+st.markdown('<div class="step-header"><span class="step-number">STEP 05</span><span class="step-title">Semantic Clustering</span></div>', unsafe_allow_html=True)
 st.markdown('<p style="color:#8b92a5;font-size:13px;margin-bottom:16px;">Agglomerative clustering using multilingual sentence embeddings (cosine similarity).</p>', unsafe_allow_html=True)
 
 threshold = st.slider("Distance threshold (lower = stricter clusters)", 0.25, 0.35, 0.28, step=0.01)
 
 col1, col2 = st.columns([1, 1])
 with col1:
-    if st.button("▶ Run Step 6", key="run6"):
-        set_status("step6", "Running")
+    if st.button("▶ Run Step 5", key="run5"):
+        set_status("step5", "Running")
         model = load_model()
-        emb = normalize(model.encode(df["Combined"].astype(str).tolist(), convert_to_numpy=True))
+
+        texts = df["Combined"].astype(str).tolist()
+        total = len(texts)
+        batch_size = max(1, total // 30) if total > 30 else 1
+
+        progress_bar = st.progress(0, text="Generating embeddings — 0%")
+        embeddings = []
+        for i in range(0, total, batch_size):
+            batch = texts[i:i + batch_size]
+            batch_emb = model.encode(batch, convert_to_numpy=True)
+            embeddings.extend(batch_emb)
+            pct = min(100, int(((i + len(batch)) / total) * 100))
+            progress_bar.progress(pct, text=f"Generating embeddings — {pct}%")
+
+        progress_bar.progress(100, text="Clustering articles — 100%")
+        emb = normalize(np.array(embeddings))
         clustering = AgglomerativeClustering(
             n_clusters=None, metric="cosine", linkage="average", distance_threshold=threshold
         )
@@ -805,14 +781,16 @@ with col1:
         for c in df["Cluster"].unique():
             summary[c] = " | ".join(df[df["Cluster"] == c]["Combined"].head(3).tolist())
         df["Cluster_Description"] = df["Cluster"].map(summary)
-        st.session_state.data = df
-        set_status("step6", "Done")
-with col2:
-    if st.button("⏭ Skip", key="skip6"):
-        set_status("step6", "Skipped")
+        progress_bar.empty()
 
-st.markdown(status_pill("step6"), unsafe_allow_html=True)
-show_preview("step6", df)
+        st.session_state.data = df
+        set_status("step5", "Done")
+with col2:
+    if st.button("⏭ Skip", key="skip5"):
+        set_status("step5", "Skipped")
+
+st.markdown(status_pill("step5"), unsafe_allow_html=True)
+show_preview("step5", df)
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
