@@ -10,3 +10,6 @@ deep-translator
 langdetect
 protobuf
 sentencepiece
+requests
+beautifulsoup4
+pdfplumber
