@@ -2,7 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import re
+import io, requests
 from io import BytesIO
+from bs4 import BeautifulSoup
+import pdfplumber
 from deep_translator import GoogleTranslator
 from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
@@ -351,7 +354,7 @@ hr { border-color: var(--border) !important; }
 .pipeline-step.skipped { background: var(--accent-grey); }
 .pipeline-step.error   { background: var(--accent-red); }
 
-/* ---- LOADING PROGRESS BAR (Step 5 clustering) — force green fill ---- */
+/* ---- LOADING PROGRESS BAR (clustering) — force green fill ---- */
 [data-testid="stProgress"] > div > div > div > div {
     background-color: var(--accent-green) !important;
 }
@@ -367,6 +370,7 @@ if "data" not in st.session_state:
 
 if "status" not in st.session_state:
     st.session_state.status = {
+        "step0": "Not Run",
         "step1": "Not Run", "step2": "Not Run", "step3": "Not Run",
         "step4": "Not Run", "step5": "Not Run",
     }
@@ -412,6 +416,41 @@ def clean_text(text):
     if pd.isnull(text):
         return text
     return str(text).replace("_x000D_", " ").replace("\n", " ").strip()
+
+# ---- Link text extraction helpers ----
+_UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+
+def _html_text(html):
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "noscript", "header", "footer", "nav"]):
+        tag.decompose()
+    return " ".join(soup.get_text(separator=" ").split())
+
+def _pdf_text(content):
+    parts = []
+    with pdfplumber.open(io.BytesIO(content)) as pdf:
+        for page in pdf.pages:
+            parts.append(page.extract_text() or "")
+    return " ".join(" ".join(parts).split())
+
+def extract_from_link(url):
+    if not url or not isinstance(url, str):
+        return "Link broken"
+    try:
+        r = requests.get(url, headers=_UA, timeout=25)
+        if r.status_code != 200:
+            return "Link broken"
+        ctype = r.headers.get("Content-Type", "").lower()
+        if "pdf" in ctype or url.lower().endswith(".pdf"):
+            text = _pdf_text(r.content)
+        elif "html" in ctype or "text" in ctype:
+            text = _html_text(r.text)
+        else:
+            return "Link broken"   # images / video have no extractable text
+        text = text.strip()
+        return text if text else "Link broken"
+    except Exception:
+        return "Link broken"
 
 def create_combined(df, cols):
     df["Combined"] = df[cols].fillna("").astype(str).agg(" ".join, axis=1)
@@ -484,6 +523,7 @@ def load_excel(file, sheet):
                 df.loc[i, "Headline_Link"] = cell.hyperlink.target
 
     return df
+
 def to_excel(df):
     buffer = BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
@@ -514,14 +554,14 @@ st.markdown("""
         <div class="app-header-title">INSIGHTS BIBIK PRO</div>
         <div class="app-header-sub">Media intelligence pipeline · NLP + Clustering</div>
     </div>
-    <div class="app-header-badge">v2.1</div>
+    <div class="app-header-badge">v2.2</div>
 </div>
 """, unsafe_allow_html=True)
 
 # ==========================================
 # PIPELINE PROGRESS BAR
 # ==========================================
-steps = ["step1", "step2", "step3", "step4", "step5"]
+steps = ["step0", "step1", "step2", "step3", "step4", "step5"]
 step_divs = ""
 for s in steps:
     status = get_status(s)
@@ -531,7 +571,7 @@ for s in steps:
 st.markdown(f"""
 <div class="pipeline-progress">{step_divs}</div>
 <p style="font-family:'Space Mono',monospace;font-size:11px;color:#4a5162;margin-bottom:28px;letter-spacing:1px;">
-  PIPELINE · 5 STEPS
+  PIPELINE · 6 STEPS
 </p>
 """, unsafe_allow_html=True)
 
@@ -563,6 +603,68 @@ st.dataframe(df.head(), use_container_width=True)
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
+# STEP 0 — EXTRACT TEXT FROM LINKS
+# ==========================================
+card_cls = step_card_class("step0")
+st.markdown(f'<div class="step-card {card_cls}">', unsafe_allow_html=True)
+st.markdown('<div class="step-header"><span class="step-number">STEP 00</span><span class="step-title">Extract Text from Headline Links</span></div>', unsafe_allow_html=True)
+st.markdown('<p style="color:#8b92a5;font-size:13px;margin-bottom:16px;">Fills blank Extract Text rows (Online / Newspaper only) by pulling text from the Headline hyperlink. TV / Radio skipped. Unreachable or non-text links return "Link broken".</p>', unsafe_allow_html=True)
+
+ec1, ec2 = st.columns(2)
+with ec1:
+    media_col_name = st.selectbox(
+        "Media Type column", df.columns,
+        index=list(df.columns).index("Media Type") if "Media Type" in df.columns else 0
+    )
+with ec2:
+    extract_col_name = st.selectbox(
+        "Extract Text column", df.columns,
+        index=list(df.columns).index("Extract Text") if "Extract Text" in df.columns else 0
+    )
+
+allowed_types = st.multiselect(
+    "Process only these Media Types",
+    ["Online", "Newspaper", "TV", "Radio"],
+    default=["Online", "Newspaper"]
+)
+
+col1, col2 = st.columns([1, 1])
+with col1:
+    if st.button("▶ Run Step 0", key="run0"):
+        if "Headline_Link" not in df.columns:
+            st.error("No Headline hyperlinks found in this file.")
+            set_status("step0", "Error")
+        else:
+            set_status("step0", "Running")
+            allowed_lower = {a.lower() for a in allowed_types}
+            targets = [
+                i for i in df.index
+                if str(df.at[i, media_col_name]).strip().lower() in allowed_lower
+                and (pd.isnull(df.at[i, extract_col_name]) or str(df.at[i, extract_col_name]).strip() == "")
+            ]
+            progress_bar = st.progress(0, text="Extracting — 0%")
+            broken = 0
+            for n, i in enumerate(targets):
+                result = extract_from_link(df.at[i, "Headline_Link"])
+                df.at[i, extract_col_name] = result
+                if result == "Link broken":
+                    broken += 1
+                pct = int(((n + 1) / max(1, len(targets))) * 100)
+                progress_bar.progress(pct, text=f"Extracting — {pct}% ({n+1}/{len(targets)})")
+            progress_bar.empty()
+            st.session_state.data = df
+            set_status("step0", "Done")
+            ok = len(targets) - broken
+            st.success(f"✓ Processed {len(targets)} rows — {ok} extracted, {broken} link broken")
+with col2:
+    if st.button("⏭ Skip", key="skip0"):
+        set_status("step0", "Skipped")
+
+st.markdown(status_pill("step0"), unsafe_allow_html=True)
+show_preview("step0", df)
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ==========================================
 # STEP 1 — COMBINE COLUMNS
 # ==========================================
 card_cls = step_card_class("step1")
@@ -571,14 +673,19 @@ st.markdown('<div class="step-header"><span class="step-number">STEP 01</span><s
 
 cols = st.multiselect("Select columns to combine into a single `Combined` field", df.columns)
 
-if st.button("▶ Run Step 1", key="run1"):
-    if cols:
-        set_status("step1", "Running")
-        df = create_combined(df, cols)
-        st.session_state.data = df
-        set_status("step1", "Done")
-    else:
-        set_status("step1", "Error")
+col1, col2 = st.columns([1, 1])
+with col1:
+    if st.button("▶ Run Step 1", key="run1"):
+        if cols:
+            set_status("step1", "Running")
+            df = create_combined(df, cols)
+            st.session_state.data = df
+            set_status("step1", "Done")
+        else:
+            set_status("step1", "Error")
+with col2:
+    if st.button("⏭ Skip", key="skip1"):
+        set_status("step1", "Skipped")
 
 st.markdown(status_pill("step1"), unsafe_allow_html=True)
 show_preview("step1", df)
