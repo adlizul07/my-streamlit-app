@@ -4,6 +4,7 @@ import numpy as np
 import re
 import io, requests
 from io import BytesIO
+from collections import defaultdict
 from bs4 import BeautifulSoup
 import pdfplumber
 from deep_translator import GoogleTranslator
@@ -314,6 +315,19 @@ hr { border-color: var(--border) !important; }
     margin-bottom: 16px;
 }
 
+/* ---- GROUP CHIP ---- */
+.group-chip {
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+.group-chip b { color: var(--text-primary); }
+.group-chip .meta { color: var(--text-secondary); }
+
 /* ---- OUTPUT CARD ---- */
 .output-card {
     background: linear-gradient(135deg, #0f1a2e 0%, #0d1520 100%);
@@ -554,7 +568,7 @@ st.markdown("""
         <div class="app-header-title">INSIGHTS BIBIK PRO</div>
         <div class="app-header-sub">Media intelligence pipeline · NLP + Clustering</div>
     </div>
-    <div class="app-header-badge">v2.2</div>
+    <div class="app-header-badge">v2.3</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -732,7 +746,7 @@ st.markdown('<div class="section-label">Add Keyword Group</div>', unsafe_allow_h
 
 col_a, col_b = st.columns(2)
 with col_a:
-    group_name = st.text_input("Group Name", "Group1")
+    group_name = st.text_input("Group Name", f"Group{len(st.session_state.keyword_groups) + 1}")
     tag_col = st.text_input("Output Column Name", "Tags")
 with col_b:
     extract_sent = st.checkbox("Extract matched sentences")
@@ -777,39 +791,65 @@ if st.button("➕ Add Keyword Group", key="add_group"):
         "group": group_name, "keywords": keywords,
         "map": display_map, "output_col": tag_col
     })
-    st.success(f"✓ Group **{group_name}** added — {len(keywords)} keywords")
+    st.success(f"✓ {group_name} added — {len(keywords)} keywords → column \"{tag_col}\"")
 
+# ---- Clean indicator instead of raw JSON ----
 if st.session_state.keyword_groups:
     st.markdown('<div class="section-label" style="margin-top:16px;">Active Groups</div>', unsafe_allow_html=True)
-    st.json(st.session_state.keyword_groups)
+    for g in st.session_state.keyword_groups:
+        st.markdown(
+            f'<div class="group-chip">✓ <b>{g["group"]}</b> added &nbsp;·&nbsp; '
+            f'<span class="meta">{len(g["keywords"])} keywords → column "{g["output_col"]}"</span></div>',
+            unsafe_allow_html=True
+        )
+    if st.button("🗑 Clear all groups", key="clear_groups", type="secondary"):
+        st.session_state.keyword_groups = []
+        st.rerun()
 
 st.markdown('<div class="step-divider"></div>', unsafe_allow_html=True)
 
 col1, col2 = st.columns([1, 1])
 with col1:
     if st.button("▶ Run All Keyword Groups", key="run3"):
-        set_status("step3", "Running")
-        for g in st.session_state.keyword_groups:
-            def get_matches(text, grp=g):
-                matched = [grp["map"][k] for k in grp["keywords"] if exact_keyword_match(text, k)]
-                return ", ".join(matched)
-            df[g["output_col"]] = df["Combined"].apply(get_matches)
+        if "Combined" not in df.columns:
+            st.error("Please run Step 1 (Combine Columns) first.")
+            set_status("step3", "Error")
+        elif not st.session_state.keyword_groups:
+            st.error("No keyword groups added.")
+            set_status("step3", "Error")
+        else:
+            set_status("step3", "Running")
 
-        if extract_sent:
-            def extract_matching_sentences(text):
-                sentences = re.split(r'(?<=[.!?])\s+', str(text))
-                matched_sentences = []
-                for s in sentences:
-                    for g in st.session_state.keyword_groups:
-                        for k in g["keywords"]:
-                            if exact_keyword_match(s, k):
+            # Merge groups that share the same output column so none overwrite each other
+            merged = defaultdict(lambda: {"keywords": [], "map": {}})
+            for g in st.session_state.keyword_groups:
+                out_col = g["output_col"]
+                merged[out_col]["keywords"].extend(g["keywords"])
+                merged[out_col]["map"].update(g["map"])
+
+            for out_col, grp in merged.items():
+                def get_matches(text, grp=grp):
+                    matched = [grp["map"][k] for k in grp["keywords"]
+                               if exact_keyword_match(text, k)]
+                    # de-duplicate while preserving order
+                    return ", ".join(dict.fromkeys(matched))
+                df[out_col] = df["Combined"].apply(get_matches)
+
+            if extract_sent:
+                def extract_matching_sentences(text):
+                    sentences = re.split(r'(?<=[.!?])\s+', str(text))
+                    matched_sentences = []
+                    for s in sentences:
+                        for g in st.session_state.keyword_groups:
+                            if any(exact_keyword_match(s, k) for k in g["keywords"]):
                                 matched_sentences.append(s)
                                 break
-                return " ".join(matched_sentences)
-            df[sent_col] = df["Combined"].apply(extract_matching_sentences)
+                    return " ".join(matched_sentences)
+                df[sent_col] = df["Combined"].apply(extract_matching_sentences)
 
-        st.session_state.data = df
-        set_status("step3", "Done")
+            st.session_state.data = df
+            set_status("step3", "Done")
+            st.success(f"✓ Tagged {len(df)} rows across {len(merged)} output column(s)")
 with col2:
     if st.button("⏭ Skip", key="skip3"):
         set_status("step3", "Skipped")
