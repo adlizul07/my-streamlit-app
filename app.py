@@ -17,7 +17,7 @@ from openpyxl import load_workbook
 # CONFIG
 # ==========================================
 st.set_page_config(
-    page_title="Insights Bibik Pro",
+    page_title="Insights Bibik Pro MAX",
     layout="wide",
     page_icon="📊"
 )
@@ -565,7 +565,7 @@ st.markdown("""
 <div class="app-header">
     <div class="app-header-icon">📊</div>
     <div>
-        <div class="app-header-title">INSIGHTS BIBIK PRO</div>
+        <div class="app-header-title">INSIGHTS BIBIK PRO MAX</div>
         <div class="app-header-sub">Media intelligence pipeline · NLP + Clustering</div>
     </div>
     <div class="app-header-badge">v2.3</div>
