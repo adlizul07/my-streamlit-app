@@ -13,3 +13,4 @@ sentencepiece
 requests
 beautifulsoup4
 pdfplumber
+torchvision
