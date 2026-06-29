@@ -19,7 +19,7 @@ from openpyxl import load_workbook
 st.set_page_config(
     page_title="Insights Copilot",
     layout="wide",
-    page_icon="📊"
+    page_icon="\U0001F4CA"
 )
 
 # ==========================================
@@ -402,10 +402,10 @@ def status_pill(step):
         "Done": "status-done", "Error": "status-error", "Skipped": "status-skipped"
     }
     dot_map = {
-        "Not Run": "●", "Running": "◉", "Done": "●", "Error": "✕", "Skipped": "—"
+        "Not Run": "\u25CF", "Running": "\u25C9", "Done": "\u25CF", "Error": "\u2715", "Skipped": "\u2014"
     }
     cls = cls_map.get(s, "status-not-run")
-    dot = dot_map.get(s, "●")
+    dot = dot_map.get(s, "\u25CF")
     return f'<span class="status-pill {cls}"><span class="status-dot">{dot}</span>{s}</span>'
 
 def step_card_class(step):
@@ -474,10 +474,6 @@ def create_combined(df, cols):
 def remove_duplicates(df, exclude_cols):
     return df.drop_duplicates(subset=[c for c in df.columns if c not in exclude_cols])
 
-def extract_sentences(text, keywords):
-    sentences = re.split(r'(?<=[.!?])\s+', str(text))
-    return " ".join([s for s in sentences if any(k.lower() in s.lower() for k in keywords)])
-
 def generate_cluster_summary(df):
     summary = {}
     for c in df["Cluster"].unique():
@@ -486,9 +482,16 @@ def generate_cluster_summary(df):
     df["Cluster_Description"] = df["Cluster"].map(summary)
     return df
 
-def exact_keyword_match(text, keyword):
-    text_tokens = re.findall(r'\b\w+\b', str(text).lower())
-    return keyword.lower() in text_tokens
+# ---- Keyword matching (fast, single compiled regex per group) ----
+def build_group_pattern(keywords):
+    """One compiled regex for the whole group, word-boundary matched.
+    Longer keywords first so multi-word phrases win over their sub-words."""
+    valid = [str(k).strip() for k in keywords if str(k).strip()]
+    if not valid:
+        return None
+    valid = sorted(set(valid), key=len, reverse=True)
+    pattern = r'(?<!\w)(' + '|'.join(re.escape(k) for k in valid) + r')(?!\w)'
+    return re.compile(pattern, re.IGNORECASE)
 
 def load_excel(file, sheet):
     wb = load_workbook(file, data_only=False)
@@ -503,14 +506,14 @@ def load_excel(file, sheet):
 
     for h in headers:
         if h is None or str(h).strip() == "":
-            st.error("❌ Wrong header detected. Please check your data.")
+            st.error("\u274C Wrong header detected. Please check your data.")
             st.stop()
 
         cleaned_headers.append(str(h).strip())
 
     # Check duplicate headers
     if len(cleaned_headers) != len(set(cleaned_headers)):
-        st.error("❌ Wrong header detected. Please check your data.")
+        st.error("\u274C Wrong header detected. Please check your data.")
         st.stop()
 
     # ==========================================
@@ -563,12 +566,12 @@ def to_excel(df):
 # ==========================================
 st.markdown("""
 <div class="app-header">
-    <div class="app-header-icon">📊</div>
+    <div class="app-header-icon">\U0001F4CA</div>
     <div>
         <div class="app-header-title">INSIGHTS COPILOT</div>
-        <div class="app-header-sub">Media intelligence pipeline · NLP + Clustering</div>
+        <div class="app-header-sub">Media intelligence pipeline \u00B7 NLP + Clustering</div>
     </div>
-    <div class="app-header-badge">v2.3</div>
+    <div class="app-header-badge">v2.4</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -585,7 +588,7 @@ for s in steps:
 st.markdown(f"""
 <div class="pipeline-progress">{step_divs}</div>
 <p style="font-family:'Space Mono',monospace;font-size:11px;color:#4a5162;margin-bottom:28px;letter-spacing:1px;">
-  PIPELINE · 6 STEPS
+  PIPELINE \u00B7 6 STEPS
 </p>
 """, unsafe_allow_html=True)
 
@@ -606,7 +609,7 @@ df = st.session_state.data
 if df is None:
     st.markdown("""
     <div style="text-align:center;padding:48px 24px;color:#4a5162;font-size:14px;">
-        ⬆ &nbsp; Upload an Excel file to begin your pipeline
+        \u2B06 &nbsp; Upload an Excel file to begin your pipeline
     </div>
     """, unsafe_allow_html=True)
     st.stop()
@@ -644,7 +647,7 @@ allowed_types = st.multiselect(
 
 col1, col2 = st.columns([1, 1])
 with col1:
-    if st.button("▶ Run Step 0", key="run0"):
+    if st.button("\u25B6 Run Step 0", key="run0"):
         if "Headline_Link" not in df.columns:
             st.error("No Headline hyperlinks found in this file.")
             set_status("step0", "Error")
@@ -669,9 +672,9 @@ with col1:
             st.session_state.data = df
             set_status("step0", "Done")
             ok = len(targets) - broken
-            st.success(f"✓ Processed {len(targets)} rows — {ok} extracted, {broken} link broken")
+            st.success(f"\u2713 Processed {len(targets)} rows — {ok} extracted, {broken} link broken")
 with col2:
-    if st.button("⏭ Skip", key="skip0"):
+    if st.button("\u23ED Skip", key="skip0"):
         set_status("step0", "Skipped")
 
 st.markdown(status_pill("step0"), unsafe_allow_html=True)
@@ -689,7 +692,7 @@ cols = st.multiselect("Select columns to combine into a single `Combined` field"
 
 col1, col2 = st.columns([1, 1])
 with col1:
-    if st.button("▶ Run Step 1", key="run1"):
+    if st.button("\u25B6 Run Step 1", key="run1"):
         if cols:
             set_status("step1", "Running")
             df = create_combined(df, cols)
@@ -698,7 +701,7 @@ with col1:
         else:
             set_status("step1", "Error")
 with col2:
-    if st.button("⏭ Skip", key="skip1"):
+    if st.button("\u23ED Skip", key="skip1"):
         set_status("step1", "Skipped")
 
 st.markdown(status_pill("step1"), unsafe_allow_html=True)
@@ -716,13 +719,13 @@ exclude_cols = st.multiselect("Exclude columns from duplicate check", df.columns
 
 col1, col2 = st.columns([1, 1])
 with col1:
-    if st.button("▶ Run Step 2", key="run2"):
+    if st.button("\u25B6 Run Step 2", key="run2"):
         set_status("step2", "Running")
         df = remove_duplicates(df, exclude_cols)
         st.session_state.data = df
         set_status("step2", "Done")
 with col2:
-    if st.button("⏭ Skip", key="skip2"):
+    if st.button("\u23ED Skip", key="skip2"):
         set_status("step2", "Skipped")
 
 st.markdown(status_pill("step2"), unsafe_allow_html=True)
@@ -774,7 +777,7 @@ if mode == "Upload File":
 else:
     kw_text = st.text_area("Enter keywords (comma separated)", placeholder="e.g. inflation, interest rate, GDP growth")
 
-if st.button("➕ Add Keyword Group", key="add_group"):
+if st.button("\u2795 Add Keyword Group", key="add_group"):
     if mode == "Upload File" and kw_file:
         kw_df = pd.read_excel(kw_file).dropna(subset=[keyword_col])
         keywords = kw_df[keyword_col].astype(str).tolist()
@@ -791,18 +794,18 @@ if st.button("➕ Add Keyword Group", key="add_group"):
         "group": group_name, "keywords": keywords,
         "map": display_map, "output_col": tag_col
     })
-    st.success(f"✓ {group_name} added — {len(keywords)} keywords → column \"{tag_col}\"")
+    st.success(f"\u2713 {group_name} added — {len(keywords)} keywords \u2192 column \"{tag_col}\"")
 
 # ---- Clean indicator instead of raw JSON ----
 if st.session_state.keyword_groups:
     st.markdown('<div class="section-label" style="margin-top:16px;">Active Groups</div>', unsafe_allow_html=True)
     for g in st.session_state.keyword_groups:
         st.markdown(
-            f'<div class="group-chip">✓ <b>{g["group"]}</b> added &nbsp;·&nbsp; '
-            f'<span class="meta">{len(g["keywords"])} keywords → column "{g["output_col"]}"</span></div>',
+            f'<div class="group-chip">\u2713 <b>{g["group"]}</b> added &nbsp;\u00B7&nbsp; '
+            f'<span class="meta">{len(g["keywords"])} keywords \u2192 column "{g["output_col"]}"</span></div>',
             unsafe_allow_html=True
         )
-    if st.button("🗑 Clear all groups", key="clear_groups", type="secondary"):
+    if st.button("\U0001F5D1 Clear all groups", key="clear_groups", type="secondary"):
         st.session_state.keyword_groups = []
         st.rerun()
 
@@ -810,7 +813,7 @@ st.markdown('<div class="step-divider"></div>', unsafe_allow_html=True)
 
 col1, col2 = st.columns([1, 1])
 with col1:
-    if st.button("▶ Run All Keyword Groups", key="run3"):
+    if st.button("\u25B6 Run All Keyword Groups", key="run3"):
         if "Combined" not in df.columns:
             st.error("Please run Step 1 (Combine Columns) first.")
             set_status("step3", "Error")
@@ -827,31 +830,46 @@ with col1:
                 merged[out_col]["keywords"].extend(g["keywords"])
                 merged[out_col]["map"].update(g["map"])
 
-            for out_col, grp in merged.items():
-                def get_matches(text, grp=grp):
-                    matched = [grp["map"][k] for k in grp["keywords"]
-                               if exact_keyword_match(text, k)]
-                    # de-duplicate while preserving order
-                    return ", ".join(dict.fromkeys(matched))
-                df[out_col] = df["Combined"].apply(get_matches)
+            combined_series = df["Combined"].astype(str)
 
+            # ---- FAST PATH: one compiled regex per output column ----
+            for out_col, grp in merged.items():
+                # lowercase display map so matched text maps back to display value
+                lower_map = {str(k).lower(): v for k, v in grp["map"].items()}
+                pattern = build_group_pattern(grp["keywords"])
+
+                if pattern is None:
+                    df[out_col] = ""
+                    continue
+
+                def get_matches(text, pat=pattern, m=lower_map):
+                    found = pat.findall(text)
+                    # map each hit to its display value, dedupe, preserve order
+                    return ", ".join(dict.fromkeys(m.get(f.lower(), f) for f in found))
+
+                df[out_col] = combined_series.map(get_matches)
+
+            # ---- Optional: extract sentences that contain any keyword ----
             if extract_sent:
-                def extract_matching_sentences(text):
-                    sentences = re.split(r'(?<=[.!?])\s+', str(text))
-                    matched_sentences = []
-                    for s in sentences:
-                        for g in st.session_state.keyword_groups:
-                            if any(exact_keyword_match(s, k) for k in g["keywords"]):
-                                matched_sentences.append(s)
-                                break
-                    return " ".join(matched_sentences)
-                df[sent_col] = df["Combined"].apply(extract_matching_sentences)
+                # one regex across ALL groups' keywords for sentence detection
+                all_keywords = []
+                for g in st.session_state.keyword_groups:
+                    all_keywords.extend(g["keywords"])
+                sent_pattern = build_group_pattern(all_keywords)
+
+                def extract_matching_sentences(text, pat=sent_pattern):
+                    if pat is None:
+                        return ""
+                    sentences = re.split(r'(?<=[.!?])\s+', text)
+                    return " ".join(s for s in sentences if pat.search(s))
+
+                df[sent_col] = combined_series.map(extract_matching_sentences)
 
             st.session_state.data = df
             set_status("step3", "Done")
-            st.success(f"✓ Tagged {len(df)} rows across {len(merged)} output column(s)")
+            st.success(f"\u2713 Tagged {len(df)} rows across {len(merged)} output column(s)")
 with col2:
-    if st.button("⏭ Skip", key="skip3"):
+    if st.button("\u23ED Skip", key="skip3"):
         set_status("step3", "Skipped")
 
 st.markdown(status_pill("step3"), unsafe_allow_html=True)
@@ -862,7 +880,7 @@ st.markdown('</div>', unsafe_allow_html=True)
 # STEP 4 SAFETY CHECK
 # ==========================================
 if "Combined" not in df.columns:
-    st.warning("⚠ Complete Step 1 before proceeding.")
+    st.warning("\u26A0 Complete Step 1 before proceeding.")
     st.stop()
 
 # ==========================================
@@ -870,19 +888,19 @@ if "Combined" not in df.columns:
 # ==========================================
 card_cls = step_card_class("step4")
 st.markdown(f'<div class="step-card {card_cls}">', unsafe_allow_html=True)
-st.markdown('<div class="step-header"><span class="step-number">STEP 04</span><span class="step-title">Auto-Translation → English</span></div>', unsafe_allow_html=True)
+st.markdown('<div class="step-header"><span class="step-number">STEP 04</span><span class="step-title">Auto-Translation \u2192 English</span></div>', unsafe_allow_html=True)
 st.markdown('<p style="color:#8b92a5;font-size:13px;margin-bottom:16px;">Translates the Combined field to English using Google Translate (auto-detect source language).</p>', unsafe_allow_html=True)
 
 col1, col2 = st.columns([1, 1])
 with col1:
-    if st.button("▶ Run Step 4", key="run4"):
+    if st.button("\u25B6 Run Step 4", key="run4"):
         set_status("step4", "Running")
         translator = GoogleTranslator(source="auto", target="en")
         df["Translated"] = df["Combined"].apply(lambda x: translator.translate(str(x)[:2000]))
         st.session_state.data = df
         set_status("step4", "Done")
 with col2:
-    if st.button("⏭ Skip", key="skip4"):
+    if st.button("\u23ED Skip", key="skip4"):
         set_status("step4", "Skipped")
 
 st.markdown(status_pill("step4"), unsafe_allow_html=True)
@@ -901,7 +919,7 @@ threshold = st.slider("Distance threshold (lower = stricter clusters)", 0.25, 0.
 
 col1, col2 = st.columns([1, 1])
 with col1:
-    if st.button("▶ Run Step 5", key="run5"):
+    if st.button("\u25B6 Run Step 5", key="run5"):
         set_status("step5", "Running")
         model = load_model()
 
@@ -933,7 +951,7 @@ with col1:
         st.session_state.data = df
         set_status("step5", "Done")
 with col2:
-    if st.button("⏭ Skip", key="skip5"):
+    if st.button("\u23ED Skip", key="skip5"):
         set_status("step5", "Skipped")
 
 st.markdown(status_pill("step5"), unsafe_allow_html=True)
@@ -947,14 +965,23 @@ st.markdown("<br>", unsafe_allow_html=True)
 st.markdown("---")
 
 st.markdown('<div class="output-card">', unsafe_allow_html=True)
-st.markdown('<h3>📥 Export Results</h3>', unsafe_allow_html=True)
-st.markdown('<p>Download your processed dataset as a formatted Excel file</p>', unsafe_allow_html=True)
+st.markdown('<h3>\U0001F4E5 Export Results</h3>', unsafe_allow_html=True)
+st.markdown('<p>Build the Excel file when you are ready, then download.</p>', unsafe_allow_html=True)
 
 filename = st.text_input("Filename", "output.xlsx", label_visibility="collapsed")
 
-st.download_button(
-    "📥 Download Excel",
-    data=to_excel(df),
-    file_name=filename
-)
+# Build only on demand so the Excel is NOT rebuilt on every rerun
+if st.button("\u2699 Prepare Excel file", key="prepare_export"):
+    st.session_state.export_buffer = to_excel(df).getvalue()
+    st.success("\u2713 File ready — click download below.")
+
+if st.session_state.get("export_buffer") is not None:
+    st.download_button(
+        "\U0001F4E5 Download Excel",
+        data=st.session_state.export_buffer,
+        file_name=filename
+    )
+else:
+    st.markdown('<p style="color:#4a5162;font-size:12px;">Click "Prepare Excel file" first.</p>', unsafe_allow_html=True)
+
 st.markdown('</div>', unsafe_allow_html=True)
