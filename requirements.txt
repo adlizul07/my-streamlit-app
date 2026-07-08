@@ -14,5 +14,3 @@ requests
 beautifulsoup4
 pdfplumber
 torchvision
-geotext
-pycountry

@@ -12,8 +12,6 @@ from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.preprocessing import normalize
 from openpyxl import load_workbook
-from geotext import GeoText
-import pycountry
 
 # ==========================================
 # CONFIG
@@ -388,7 +386,7 @@ if "status" not in st.session_state:
     st.session_state.status = {
         "step0": "Not Run",
         "step1": "Not Run", "step2": "Not Run", "step3": "Not Run",
-        "step4": "Not Run", "step5": "Not Run", "step6": "Not Run",
+        "step4": "Not Run", "step5": "Not Run",
     }
 
 def set_status(step, value):
@@ -495,31 +493,6 @@ def build_group_pattern(keywords):
     pattern = r'(?<!\w)(' + '|'.join(re.escape(k) for k in valid) + r')(?!\w)'
     return re.compile(pattern, re.IGNORECASE)
 
-# ---- GeoText helpers (Location + Country of location) ----
-def _country_code_to_name(code):
-    try:
-        country = pycountry.countries.get(alpha_2=code)
-        return country.name if country else code
-    except Exception:
-        return code
-
-def extract_geo(text):
-    """Runs GeoText on English text and returns (location_string, country_string).
-    Location = unique cities detected.
-    Country = unique countries associated with the matched cities/country mentions."""
-    if not text or not isinstance(text, str):
-        return "", ""
-    places = GeoText(text)
-
-    cities = list(dict.fromkeys(places.cities))
-    location = ", ".join(cities)
-
-    country_codes = list(places.country_mentions.keys())
-    country_names = [_country_code_to_name(c) for c in country_codes]
-    country = ", ".join(dict.fromkeys(country_names))
-
-    return location, country
-
 def load_excel(file, sheet):
     wb = load_workbook(file, data_only=False)
     ws = wb[sheet]
@@ -598,14 +571,14 @@ st.markdown("""
         <div class="app-header-title">INSIGHTS COPILOT</div>
         <div class="app-header-sub">Media intelligence pipeline \u00B7 NLP + Clustering</div>
     </div>
-    <div class="app-header-badge">v2.5</div>
+    <div class="app-header-badge">v2.4</div>
 </div>
 """, unsafe_allow_html=True)
 
 # ==========================================
 # PIPELINE PROGRESS BAR
 # ==========================================
-steps = ["step0", "step1", "step2", "step3", "step4", "step5", "step6"]
+steps = ["step0", "step1", "step2", "step3", "step4", "step5"]
 step_divs = ""
 for s in steps:
     status = get_status(s)
@@ -615,7 +588,7 @@ for s in steps:
 st.markdown(f"""
 <div class="pipeline-progress">{step_divs}</div>
 <p style="font-family:'Space Mono',monospace;font-size:11px;color:#4a5162;margin-bottom:28px;letter-spacing:1px;">
-  PIPELINE \u00B7 7 STEPS
+  PIPELINE \u00B7 6 STEPS
 </p>
 """, unsafe_allow_html=True)
 
@@ -983,55 +956,6 @@ with col2:
 
 st.markdown(status_pill("step5"), unsafe_allow_html=True)
 show_preview("step5", df)
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ==========================================
-# STEP 6 — LOCATION / COUNTRY (GeoText)
-# ==========================================
-card_cls = step_card_class("step6")
-st.markdown(f'<div class="step-card {card_cls}">', unsafe_allow_html=True)
-st.markdown('<div class="step-header"><span class="step-number">STEP 06</span><span class="step-title">Location & Country Detection (GeoText)</span></div>', unsafe_allow_html=True)
-st.markdown('<p style="color:#8b92a5;font-size:13px;margin-bottom:16px;">Detects cities and countries from the Translated field (Step 4 output). Adds two columns: Location and Country. Requires Step 4 (Translation) to be run first, since GeoText only works on English text.</p>', unsafe_allow_html=True)
-
-step4_ready = get_status("step4") == "Done" and "Translated" in df.columns
-
-if not step4_ready:
-    st.warning("\u26A0 Please run Step 4 (Translation) first — this step reads from the Translated column.")
-
-col1, col2 = st.columns([1, 1])
-with col1:
-    run6_clicked = st.button("\u25B6 Run Step 6", key="run6", disabled=not step4_ready)
-    if run6_clicked:
-        set_status("step6", "Running")
-
-        translated_series = df["Translated"].astype(str)
-
-        progress_bar = st.progress(0, text="Detecting locations — 0%")
-        total = len(translated_series)
-
-        locations, countries = [], []
-        for n, text in enumerate(translated_series):
-            loc, country = extract_geo(text)
-            locations.append(loc)
-            countries.append(country)
-            if n % 25 == 0 or n == total - 1:
-                pct = int(((n + 1) / max(1, total)) * 100)
-                progress_bar.progress(pct, text=f"Detecting locations — {pct}% ({n+1}/{total})")
-
-        progress_bar.empty()
-
-        df["Location"] = locations
-        df["Country"] = countries
-
-        st.session_state.data = df
-        set_status("step6", "Done")
-        st.success(f"\u2713 Detected locations/countries for {len(df)} rows")
-with col2:
-    if st.button("\u23ED Skip", key="skip6"):
-        set_status("step6", "Skipped")
-
-st.markdown(status_pill("step6"), unsafe_allow_html=True)
-show_preview("step6", df)
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
