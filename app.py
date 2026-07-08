@@ -12,7 +12,6 @@ from sentence_transformers import SentenceTransformer
 from sklearn.cluster import AgglomerativeClustering
 from sklearn.preprocessing import normalize
 from openpyxl import load_workbook
-from gliner import GLiNER
 
 # ==========================================
 # CONFIG
@@ -387,7 +386,7 @@ if "status" not in st.session_state:
     st.session_state.status = {
         "step0": "Not Run",
         "step1": "Not Run", "step2": "Not Run", "step3": "Not Run",
-        "step4": "Not Run", "step5": "Not Run", "step6": "Not Run",
+        "step4": "Not Run", "step5": "Not Run",
     }
 
 def set_status(step, value):
@@ -423,10 +422,6 @@ def show_preview(step, df):
 @st.cache_resource
 def load_model():
     return SentenceTransformer("paraphrase-multilingual-mpnet-base-v2")
-
-@st.cache_resource
-def load_gliner_model():
-    return GLiNER.from_pretrained("urchade/gliner_multi-v2.1")
 
 # ==========================================
 # HELPERS
@@ -576,14 +571,14 @@ st.markdown("""
         <div class="app-header-title">INSIGHTS COPILOT</div>
         <div class="app-header-sub">Media intelligence pipeline \u00B7 NLP + Clustering</div>
     </div>
-    <div class="app-header-badge">v2.5</div>
+    <div class="app-header-badge">v2.4</div>
 </div>
 """, unsafe_allow_html=True)
 
 # ==========================================
 # PIPELINE PROGRESS BAR
 # ==========================================
-steps = ["step0", "step1", "step2", "step3", "step4", "step5", "step6"]
+steps = ["step0", "step1", "step2", "step3", "step4", "step5"]
 step_divs = ""
 for s in steps:
     status = get_status(s)
@@ -593,7 +588,7 @@ for s in steps:
 st.markdown(f"""
 <div class="pipeline-progress">{step_divs}</div>
 <p style="font-family:'Space Mono',monospace;font-size:11px;color:#4a5162;margin-bottom:28px;letter-spacing:1px;">
-  PIPELINE \u00B7 7 STEPS
+  PIPELINE \u00B7 6 STEPS
 </p>
 """, unsafe_allow_html=True)
 
@@ -961,86 +956,6 @@ with col2:
 
 st.markdown(status_pill("step5"), unsafe_allow_html=True)
 show_preview("step5", df)
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ==========================================
-# STEP 6 — NAMED ENTITY EXTRACTION (GLiNER)
-# ==========================================
-card_cls = step_card_class("step6")
-st.markdown(f'<div class="step-card {card_cls}">', unsafe_allow_html=True)
-st.markdown('<div class="step-header"><span class="step-number">STEP 06</span><span class="step-title">Named Entity Extraction (GLiNER)</span></div>', unsafe_allow_html=True)
-st.markdown('<p style="color:#8b92a5;font-size:13px;margin-bottom:16px;">Extracts entities from the Combined field using a multilingual zero-shot NER model. Adds five new columns: Company/Government Agency, Person, Location, Country of Location, Policy/Project.</p>', unsafe_allow_html=True)
-
-gc1, gc2 = st.columns(2)
-with gc1:
-    gliner_threshold = st.slider("Confidence threshold", 0.3, 0.7, 0.5, step=0.05, key="gliner_threshold")
-with gc2:
-    gliner_char_limit = st.number_input("Max characters processed per row", min_value=200, max_value=3000, value=1000, step=100, key="gliner_char_limit")
-
-col1, col2 = st.columns([1, 1])
-with col1:
-    if st.button("\u25B6 Run Step 6", key="run6"):
-        if "Combined" not in df.columns:
-            st.error("Please run Step 1 (Combine Columns) first.")
-            set_status("step6", "Error")
-        else:
-            set_status("step6", "Running")
-            model = load_gliner_model()
-
-            # Labels sent to GLiNER — kept close to natural language for best zero-shot results
-            gliner_labels = ["company", "government agency", "person", "location", "country", "policy", "project"]
-
-            texts = df["Combined"].astype(str).str.slice(0, gliner_char_limit).tolist()
-            total = len(texts)
-            batch_size = 8
-
-            progress_bar = st.progress(0, text="Extracting entities — 0%")
-
-            company_col, person_col, location_col, country_col, policy_col = [], [], [], [], []
-
-            for i in range(0, total, batch_size):
-                batch = texts[i:i + batch_size]
-                batch_results = model.batch_predict_entities(batch, gliner_labels, threshold=gliner_threshold)
-
-                for ents in batch_results:
-                    grouped = defaultdict(list)
-                    for ent in ents:
-                        grouped[ent["label"]].append(ent["text"])
-
-                    def dedupe_join(labels_to_pull, grouped=grouped):
-                        seen = []
-                        for lbl in labels_to_pull:
-                            for val in grouped.get(lbl, []):
-                                if val not in seen:
-                                    seen.append(val)
-                        return ", ".join(seen)
-
-                    company_col.append(dedupe_join(["company", "government agency"]))
-                    person_col.append(dedupe_join(["person"]))
-                    location_col.append(dedupe_join(["location"]))
-                    country_col.append(dedupe_join(["country"]))
-                    policy_col.append(dedupe_join(["policy", "project"]))
-
-                pct = min(100, int(((i + len(batch)) / total) * 100))
-                progress_bar.progress(pct, text=f"Extracting entities — {pct}% ({min(i+batch_size, total)}/{total})")
-
-            progress_bar.empty()
-
-            df["Company/Government Agency"] = company_col
-            df["Person"] = person_col
-            df["Location"] = location_col
-            df["Country of Location"] = country_col
-            df["Policy/Project"] = policy_col
-
-            st.session_state.data = df
-            set_status("step6", "Done")
-            st.success(f"\u2713 Extracted entities for {len(df)} rows")
-with col2:
-    if st.button("\u23ED Skip", key="skip6"):
-        set_status("step6", "Skipped")
-
-st.markdown(status_pill("step6"), unsafe_allow_html=True)
-show_preview("step6", df)
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ==========================================
