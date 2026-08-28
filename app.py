@@ -37,18 +37,18 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
 
 :root {
-    --bg-base:        #ffffff;
-    --bg-raised:      #f6f7f9;
-    --border:         #e2e5ea;
-    --border-strong:  #cbd0d9;
-    --accent:         #2563eb;
-    --accent-soft:    #eff4ff;
-    --ok:             #10893e;
-    --warn:           #b26a00;
-    --err:            #d13438;
-    --muted:          #8b919d;
-    --text:           #1b1f27;
-    --text-2:         #5c6472;
+    --bg-base:        #0d0f12;
+    --bg-raised:      #13161b;
+    --border:         #252932;
+    --border-strong:  #333846;
+    --accent:         #2e7dff;
+    --accent-soft:    #2e7dff18;
+    --ok:             #00d48f;
+    --warn:           #f5a623;
+    --err:            #ff4757;
+    --muted:          #4a5162;
+    --text:           #e8eaf0;
+    --text-2:         #8b92a5;
     --radius:         8px;
 }
 
@@ -87,10 +87,10 @@ html, body, [data-testid="stAppViewContainer"] {
     font-size: 12px; padding: 3px 10px; border-radius: 100px;
     border: 1px solid; margin-top: 10px;
 }
-.status-not-run { color: var(--warn); border-color: #e8cfa4; background: #fdf7ec; }
-.status-running { color: var(--accent); border-color: #bcd0fb; background: var(--accent-soft); }
-.status-done    { color: var(--ok); border-color: #b6dfc4; background: #f0faf3; }
-.status-error   { color: var(--err); border-color: #f2c0c1; background: #fdf1f1; }
+.status-not-run { color: var(--warn); border-color: #f5a62355; background: #f5a62310; }
+.status-running { color: var(--accent); border-color: #2e7dff55; background: var(--accent-soft); }
+.status-done    { color: var(--ok); border-color: #00d48f55; background: #00d48f10; }
+.status-error   { color: var(--err); border-color: #ff475755; background: #ff475710; }
 
 /* ---- Section label ---- */
 .section-label { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 10px; }
@@ -124,7 +124,7 @@ html, body, [data-testid="stAppViewContainer"] {
     border-color: var(--accent) !important;
     color: #fff !important;
 }
-.stButton > button[kind="primary"]:hover { background: #1d4fd8 !important; color: #fff !important; }
+.stButton > button[kind="primary"]:hover { background: #4a92ff !important; border-color: #4a92ff !important; color: #fff !important; }
 
 [data-testid="stDownloadButton"] > button {
     width: 100%;
@@ -148,6 +148,30 @@ html, body, [data-testid="stAppViewContainer"] {
     color: var(--text) !important;
 }
 .stTextInput > div > div > input:focus { border-color: var(--accent) !important; }
+
+/* Value text inside selects — without this it inherits the base theme colour
+   and can render white on white. */
+.stSelectbox div[data-baseweb="select"] *,
+.stMultiSelect div[data-baseweb="select"] * {
+    color: var(--text) !important;
+}
+.stSelectbox div[data-baseweb="select"] svg,
+.stMultiSelect div[data-baseweb="select"] svg { fill: var(--text-2) !important; }
+
+/* Selected chips in a multiselect */
+.stMultiSelect [data-baseweb="tag"] {
+    background: var(--accent-soft) !important;
+    border: 1px solid #2e7dff55 !important;
+}
+.stMultiSelect [data-baseweb="tag"] span { color: var(--accent) !important; }
+
+/* The dropdown menu itself renders in a portal outside the widget */
+div[data-baseweb="popover"] ul,
+div[data-baseweb="popover"] li {
+    background: var(--bg-base) !important;
+    color: var(--text) !important;
+}
+div[data-baseweb="popover"] li:hover { background: var(--accent-soft) !important; }
 
 label, .stSelectbox label, .stMultiSelect label,
 .stTextInput label, .stCheckbox label, .stSlider label {
