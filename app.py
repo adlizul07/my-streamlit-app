@@ -63,7 +63,28 @@ html, body, [data-testid="stAppViewContainer"] {
     border-right: 1px solid var(--border);
 }
 
-#MainMenu, footer, header { visibility: hidden; }
+/* ---- Sidebar always open ----
+   The collapse arrow lives inside the Streamlit header. Hiding the whole
+   header used to hide the reopen control as well, which left the sidebar
+   stuck shut. The collapse control is removed instead so the sidebar
+   stays fixed and open. */
+[data-testid="stSidebarCollapseButton"],
+[data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"],
+[data-testid="stSidebarNavCollapseIcon"],
+[data-testid="stSidebarHeader"] button {
+    display: none !important;
+}
+
+[data-testid="stSidebar"] {
+    min-width: 320px !important;
+    max-width: 320px !important;
+    transform: none !important;
+    visibility: visible !important;
+}
+
+#MainMenu, footer { visibility: hidden; }
+[data-testid="stHeader"] { background: transparent !important; }
 [data-testid="stDecoration"] { display: none; }
 
 .block-container { padding: 2rem 3rem 4rem !important; max-width: 1180px; }
